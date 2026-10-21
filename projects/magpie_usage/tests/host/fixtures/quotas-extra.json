@@ -1,0 +1,168 @@
+{
+  "data": [
+    {
+      "provider": "office/claude",
+      "name": "Claude Code \u00b7 Remote magpie",
+      "plan": "pro",
+      "windows": [
+        {
+          "name": "5 hours",
+          "used": 99.5,
+          "remaining": 0.5,
+          "resetsAt": "2026-10-21T12:29:00+08:00"
+        },
+        {
+          "name": "7 days",
+          "used": 63,
+          "remaining": 37,
+          "resetsAt": "2026-10-24T15:00:00Z"
+        }
+      ]
+    },
+    {
+      "provider": "office/claude",
+      "name": "Claude Code \u00b7 Remote magpie",
+      "plan": "max",
+      "windows": [
+        {
+          "name": "5 hours",
+          "used": 12,
+          "remaining": 88,
+          "resetsAt": "2026-10-21T18:00:00+08:00"
+        }
+      ]
+    },
+    {
+      "provider": "office/codex",
+      "name": "Codex \u00b7 Remote magpie",
+      "plan": "prolite",
+      "windows": [
+        {
+          "name": "7 days",
+          "used": 8,
+          "remaining": 92,
+          "resetsAt": "2026-10-27T14:32:41.213Z"
+        }
+      ]
+    },
+    {
+      "provider": "office/zcode",
+      "name": "ZCode \u00b7 Remote magpie",
+      "windows": [
+        {
+          "name": "5 hours",
+          "used": 44,
+          "remaining": 56,
+          "resetsAt": "2026-10-21T16:00:00+08:00"
+        }
+      ]
+    },
+    {
+      "provider": "office/kimi-code-cn",
+      "name": "Kimi Code \u00b7 Remote magpie",
+      "windows": [
+        {
+          "name": "7 days",
+          "used": 100,
+          "remaining": 0,
+          "resetsAt": "2026-10-21T09:00:26.052876Z"
+        }
+      ]
+    },
+    {
+      "provider": "office/opencode-go",
+      "name": "OpenCode Go \u00b7 Remote magpie",
+      "plan": "Go",
+      "windows": [
+        {
+          "name": "5 hours",
+          "used": 30,
+          "remaining": 70,
+          "resetsAt": "2026-10-21T17:00:00+08:00"
+        }
+      ]
+    },
+    {
+      "provider": "office/grok",
+      "name": "Grok \u00b7 Remote magpie",
+      "windows": [
+        {
+          "name": "7 days",
+          "used": 21,
+          "remaining": 79,
+          "resetsAt": "2026-10-26T17:33:27.213Z"
+        }
+      ]
+    },
+    {
+      "provider": "office/cursor",
+      "name": "Cursor \u00b7 Remote magpie",
+      "plan": "Team",
+      "windows": [
+        {
+          "name": "Cursor Models",
+          "used": 0.07142857142857142,
+          "remaining": 99.92857142857143,
+          "resetsAt": "2026-11-10T03:19:24Z"
+        },
+        {
+          "name": "On-demand",
+          "used": 72.34959349593495,
+          "remaining": 27.650406504065046,
+          "resetsAt": "2026-11-10T03:19:24Z"
+        }
+      ]
+    },
+    {
+      "provider": "office/devin",
+      "name": "Devin \u00b7 Remote magpie",
+      "windows": [
+        {
+          "name": "Monthly",
+          "used": 55,
+          "remaining": 45,
+          "resetsAt": "2026-11-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "provider": "office/workbuddy",
+      "name": "WorkBuddy \u00b7 Remote magpie",
+      "plan": "Pro",
+      "windows": [
+        {
+          "name": "Credits",
+          "used": 4.006842104035087,
+          "remaining": 95.99315789596491,
+          "resetsAt": null
+        }
+      ]
+    },
+    {
+      "provider": "office/workbuddy",
+      "name": "WorkBuddy \u00b7 Remote magpie",
+      "plan": "Pro",
+      "windows": [
+        {
+          "name": "Credits",
+          "used": 61,
+          "remaining": 39,
+          "resetsAt": null
+        }
+      ]
+    },
+    {
+      "provider": "office/minimax",
+      "name": "MiniMax \u00b7 Remote magpie",
+      "error": "signed out",
+      "windows": []
+    },
+    {
+      "provider": "office/deepseek",
+      "name": "DeepSeek \u00b7 Remote magpie",
+      "kind": "balance",
+      "plan": "prepaid",
+      "windows": []
+    }
+  ]
+}

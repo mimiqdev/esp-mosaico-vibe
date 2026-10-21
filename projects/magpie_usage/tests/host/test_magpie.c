@@ -347,6 +347,113 @@ static void test_sub_edge_cases(void)
     CHECK(sub.windows[0].used_percent == 100);
 }
 
+/* ---- the real 13-subscription shape --------------------------------- */
+
+static void test_extra_fixture(void)
+{
+    size_t len = 0;
+    char *body = load_fixture("payloads-extra/index.json", &len);
+    if (!body) {
+        return;
+    }
+    magpie_index_t index;
+    CHECK(magpie_decode_index(body, len, &index) == MAGPIE_OK);
+    CHECK(index.count == 13);
+    CHECK(index.count <= MAGPIE_SLOTS_MAX);
+    CHECK(index.summary.valid);
+    CHECK(index.summary.used_percent == 100);
+    free(body);
+
+    magpie_state_t state;
+    magpie_state_init(&state);
+    magpie_state_set_index(&state, &index);
+
+    unsigned signed_out = 0;
+    unsigned balance_only = 0;
+    unsigned with_unknown_reset = 0;
+    for (uint8_t slot = 0; slot < index.count; ++slot) {
+        char name[64];
+        snprintf(name, sizeof(name), "payloads-extra/sub-%u.json",
+                 (unsigned)slot);
+        size_t sub_len = 0;
+        char *sub_body = load_fixture(name, &sub_len);
+        if (!sub_body) {
+            return;
+        }
+        CHECK(sub_len <= MAGPIE_SUB_BYTES_MAX);
+        magpie_sub_t sub;
+        CHECK(magpie_decode_sub(sub_body, sub_len, slot, &sub) == MAGPIE_OK);
+        CHECK(sub.index == slot);
+        free(sub_body);
+        if (sub.error) {
+            ++signed_out;
+        }
+        if (sub.window_count == 0 && !sub.error) {
+            ++balance_only;
+        }
+        for (uint8_t w = 0; w < sub.window_count; ++w) {
+            if (sub.windows[w].reset_epoch_s == 0) {
+                ++with_unknown_reset;
+            }
+        }
+        CHECK(magpie_state_set_sub(&state, &sub));
+    }
+    /* One signed-out provider, one balance-only provider, and the two
+     * WorkBuddy credit windows have no reset time. */
+    CHECK(signed_out == 1);
+    CHECK(balance_only == 1);
+    CHECK(with_unknown_reset == 2);
+    CHECK(state.pages_visible == 13);
+    CHECK(state.sub_count == 13);
+
+    /* Both Claude accounts are numbered and independently pageable. */
+    magpie_page_text_t page;
+    CHECK(magpie_page_text(&state, 0, &page));
+    CHECK_STR(page.name, "Claude Code (1)");
+    CHECK_STR(page.plan, "PRO");
+    CHECK_STR(page.window_used[0], "100%");
+    CHECK(magpie_page_text(&state, 8, &page));
+    CHECK_STR(page.name, "Claude Code (2)");
+    CHECK_STR(page.plan, "MAX");
+    CHECK_STR(page.window_used[0], "12%");
+
+    /* The signed-out provider shows its error flag and no windows. */
+    CHECK(magpie_page_text(&state, 12, &page));
+    CHECK_STR(page.name, "MiniMax");
+    CHECK(page.error);
+    CHECK(page.window_count == 0);
+
+    /* The balance-only provider is not an error; it has "no quota windows". */
+    CHECK(magpie_page_text(&state, 11, &page));
+    CHECK_STR(page.name, "DeepSeek");
+    CHECK(!page.error);
+    CHECK(page.empty);
+    CHECK(page.window_count == 0);
+
+    /* A monthly window keeps its 30-day label and countdown. */
+    CHECK(magpie_page_text(&state, 4, &page));
+    CHECK_STR(page.name, "Devin");
+    CHECK_STR(page.window_label[0], "30-DAY WINDOW");
+    CHECK_STR(page.window_used[0], "55%");
+
+    /* WorkBuddy credits have no reset epoch, so the countdown is "--". */
+    CHECK(magpie_page_text(&state, 3, &page));
+    CHECK_STR(page.name, "WorkBuddy (1)");
+    CHECK_STR(page.window_label[0], "CREDITS USED");
+    CHECK_STR(page.window_reset[0], "--");
+
+    /* 13 pages: the counter reaches 13 and the last page is selectable. */
+    magpie_state_mark_data(&state, 2, MAGPIE_TRANSPORT_WIFI);
+    magpie_state_set_page(&state, 12);
+    magpie_header_text_t header;
+    magpie_header_text(&state, &header);
+    CHECK_STR(header.counter, "13/13");
+    CHECK_STR(header.transport, "WIFI");
+    CHECK_STR(header.status, "LIVE");
+    /* Remaining a single page for the summary is the tightest window. */
+    CHECK(strstr(header.tightest, "Claude Code (1)") == header.tightest);
+}
+
 /* ---- pull cycle ------------------------------------------------------ */
 
 typedef struct {
@@ -749,6 +856,7 @@ int main(int argc, char **argv)
     test_index_edge_cases();
     test_sub_fixture();
     test_sub_edge_cases();
+    test_extra_fixture();
     test_pull_cycle();
     test_ui_state();
     test_countdown_format();

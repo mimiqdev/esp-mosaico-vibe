@@ -25,6 +25,10 @@ def load_quotas(name: str = "quotas.json") -> dict:
     return json.loads((FIXTURES / name).read_text())
 
 
+def load_extra() -> dict:
+    return load_quotas("quotas-extra.json")
+
+
 def provider(**overrides) -> dict:
     entry = {
         "provider": "office/example",
@@ -162,6 +166,68 @@ class DeriveTests(unittest.TestCase):
         snapshot = mp.build_snapshot({"data": data}, now=NOW)
         self.assertEqual(snapshot.count, mp.MAX_SUBSCRIPTIONS)
         self.assertEqual(snapshot.index["ids"], list(range(16)))
+
+
+class ExtraFixtureTests(unittest.TestCase):
+    """The 13-subscription shape: two accounts, -1 error, 1 balance-only."""
+
+    def setUp(self):
+        self.subs = mp.derive_subscriptions(load_extra())
+
+    def test_count_and_cap(self):
+        self.assertEqual(len(self.subs), 13)
+        self.assertLessEqual(len(self.subs), mp.MAX_SUBSCRIPTIONS)
+        self.assertEqual([sub["i"] for sub in self.subs], list(range(13)))
+
+    def test_signed_out_sorts_last(self):
+        last = self.subs[-1]
+        self.assertEqual(last["p"], "minimax")
+        self.assertEqual(last["e"], 1)
+        self.assertEqual(last["w"], [])
+        # Nothing else is flagged.
+        self.assertEqual([sub["p"] for sub in self.subs if sub["e"]], ["minimax"])
+
+    def test_balance_only_provider(self):
+        deepseek = [sub for sub in self.subs if sub["p"] == "deepseek"]
+        self.assertEqual(len(deepseek), 1)
+        self.assertEqual(deepseek[0]["w"], [])
+        self.assertEqual(deepseek[0]["e"], 0)
+        self.assertEqual(deepseek[0]["pl"], "prepaid")
+
+    def test_duplicate_providers_are_numbered(self):
+        claude = [sub["n"] for sub in self.subs if sub["p"] == "claude"]
+        workbuddy = [sub["n"] for sub in self.subs if sub["p"] == "workbuddy"]
+        self.assertEqual(sorted(claude), ["Claude Code (1)", "Claude Code (2)"])
+        self.assertEqual(sorted(workbuddy),
+                         ["WorkBuddy (1)", "WorkBuddy (2)"])
+
+    def test_unknown_reset_stays_zero(self):
+        workbuddy = [sub for sub in self.subs if sub["p"] == "workbuddy"]
+        for sub in workbuddy:
+            self.assertEqual(sub["w"][0]["r"], 0)
+            self.assertEqual(sub["w"][0]["n"], "cred")
+
+    def test_monthly_label(self):
+        devin = [sub for sub in self.subs if sub["p"] == "devin"][0]
+        self.assertEqual(devin["w"][0]["n"], "30d")
+        self.assertEqual(devin["w"][0]["u"], 55)
+
+    def test_every_payload_fits(self):
+        snapshot = mp.build_snapshot(load_extra(), now=NOW)
+        self.assertEqual(snapshot.count, 13)
+        self.assertLessEqual(len(snapshot.index_bytes), mp.INDEX_PAYLOAD_MAX)
+        for blob in snapshot.sub_bytes:
+            self.assertLessEqual(len(blob), mp.SUB_PAYLOAD_MAX)
+        self.assertEqual(snapshot.index["lo"]["u"], 100)
+
+    def test_fractional_used_rounds(self):
+        # 99.5% used rounds to 100; 0.0714% rounds to 0.
+        snapshot = mp.build_snapshot(load_extra(), now=NOW)
+        claude = [sub for sub in snapshot.subs if sub["p"] == "claude"][0]
+        self.assertEqual(claude["w"][0]["u"], 100)
+        cursor = [sub for sub in snapshot.subs if sub["p"] == "cursor"][0]
+        self.assertEqual(cursor["w"][0]["u"], 72)
+        self.assertEqual(cursor["w"][0]["n"], "od")
 
 
 class PayloadSizeTests(unittest.TestCase):
