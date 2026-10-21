@@ -1,0 +1,28 @@
+{
+  "apis": [
+    "/v1/chat/completions",
+    "/v1/responses",
+    "/v1/messages",
+    "/v1/systemone",
+    "/v1beta/models/{model}:generateContent",
+    "/v1/images/generations",
+    "/v1/images/edits",
+    "/v1/videos",
+    "/v1/embeddings",
+    "/v1/rerank",
+    "/v1/audio/transcriptions",
+    "/v1/audio/translations",
+    "/v1/magpie/quotas",
+    "/v1/magpie/quotas/history",
+    "/v1/magpie/usage",
+    "/v1/magpie/usage/requests",
+    "/v1/magpie/route",
+    "/mcp/magpie/web-search",
+    "/mcp/magpie/vision",
+    "/mcp/magpie/tools"
+  ],
+  "models": 124,
+  "name": "magpie",
+  "version": "0.1.1268",
+  "window": false
+}

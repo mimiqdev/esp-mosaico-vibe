@@ -1,0 +1,176 @@
+{
+  "data": [
+    {
+      "kind": "subscription",
+      "name": "Copilot",
+      "plan": "Free",
+      "provider": "copilot",
+      "readAt": "2026-10-21T11:30:54.82046447+08:00",
+      "user": "user@example.com",
+      "windows": [
+        {
+          "display": "0 / 200",
+          "name": "Chat requests",
+          "remaining": 100,
+          "resetsAt": "2026-11-01T00:00:00Z",
+          "used": 0
+        },
+        {
+          "display": "0 / 2000",
+          "name": "Completions",
+          "remaining": 100,
+          "resetsAt": "2026-11-01T00:00:00Z",
+          "used": 0
+        }
+      ]
+    },
+    {
+      "from": "Remote magpie",
+      "kind": "subscription",
+      "name": "Claude Code \u00b7 Remote magpie",
+      "plan": "pro",
+      "provider": "office/claude",
+      "readAt": "2026-10-21T11:27:40.835574258+08:00",
+      "user": "user@example.com",
+      "windows": [
+        {
+          "name": "5 hours",
+          "remaining": 16,
+          "resetsAt": "2026-10-21T12:29:00+08:00",
+          "used": 84
+        },
+        {
+          "name": "7 days",
+          "remaining": 50,
+          "resetsAt": "2026-10-23T16:59:00+08:00",
+          "used": 50
+        }
+      ]
+    },
+    {
+      "asOf": "2026-10-21T11:26:36.277345992+08:00",
+      "from": "Remote magpie",
+      "kind": "subscription",
+      "name": "Claude Code \u00b7 Remote magpie",
+      "plan": "pro",
+      "provider": "office/claude",
+      "readAt": "2026-10-21T10:47:39.017993019+08:00",
+      "readDeferred": true,
+      "user": "user@example.com",
+      "windows": [
+        {
+          "name": "5 hours",
+          "remaining": 2,
+          "resetsAt": "2026-10-21T15:30:00+08:00",
+          "used": 98
+        },
+        {
+          "name": "7 days",
+          "remaining": 63,
+          "resetsAt": "2026-10-24T15:00:00+08:00",
+          "used": 37
+        }
+      ]
+    },
+    {
+      "from": "Remote magpie",
+      "kind": "subscription",
+      "name": "Cursor \u00b7 Remote magpie",
+      "plan": "Team",
+      "provider": "office/cursor",
+      "readAt": "2026-10-21T11:30:47.67843858+08:00",
+      "user": "user@example.com",
+      "windows": [
+        {
+          "name": "Cursor Models",
+          "remaining": 99.92857142857143,
+          "resetsAt": "2026-11-10T03:19:24Z",
+          "used": 0.07142857142857142
+        },
+        {
+          "name": "Other Models",
+          "remaining": 100,
+          "resetsAt": "2026-11-10T03:19:24Z",
+          "used": 0
+        },
+        {
+          "display": "$88.99 / $123.00 (you: $0.00)",
+          "name": "On-demand",
+          "remaining": 27.650406504065046,
+          "resetsAt": "2026-11-10T03:19:24Z",
+          "used": 72.34959349593495
+        },
+        {
+          "name": "Grok Bot",
+          "remaining": 100,
+          "resetsAt": "2026-10-26T17:33:27.213Z",
+          "used": 0
+        },
+        {
+          "name": "Total",
+          "remaining": 99.94,
+          "resetsAt": "2026-11-10T03:19:24Z",
+          "used": 0.06
+        }
+      ]
+    },
+    {
+      "from": "Remote magpie",
+      "kind": "subscription",
+      "name": "Codex \u00b7 Remote magpie",
+      "plan": "prolite",
+      "provider": "office/codex",
+      "readAt": "2026-10-21T11:30:48.23057459+08:00",
+      "user": "user@example.com",
+      "windows": [
+        {
+          "name": "7 days",
+          "remaining": 92,
+          "resetsAt": "2026-10-27T14:32:41+08:00",
+          "used": 8
+        }
+      ]
+    },
+    {
+      "from": "Remote magpie",
+      "kind": "subscription",
+      "name": "WorkBuddy \u00b7 Remote magpie",
+      "plan": "Pro",
+      "provider": "office/workbuddy",
+      "readAt": "2026-10-21T11:30:48.290116129+08:00",
+      "user": "user@example.com",
+      "windows": [
+        {
+          "amount": 228.38999993,
+          "display": "228.39 / 5700",
+          "limit": 5700,
+          "name": "Credits",
+          "remaining": 95.99315789596491,
+          "unit": "credits",
+          "used": 4.006842104035087
+        }
+      ]
+    },
+    {
+      "from": "Remote magpie",
+      "kind": "plan",
+      "name": "Kimi Code (China) \u00b7 Remote magpie",
+      "provider": "office/kimi-code-cn",
+      "windows": [
+        {
+          "name": "5 hours",
+          "remaining": 93,
+          "resetsAt": "2026-10-21T04:00:26.052876Z",
+          "used": 7.000000000000001
+        },
+        {
+          "name": "7 days",
+          "remaining": 0,
+          "resetsAt": "2026-10-21T09:00:26.052876Z",
+          "used": 100
+        }
+      ]
+    }
+  ],
+  "object": "list"
+}

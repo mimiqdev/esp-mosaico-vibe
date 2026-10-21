@@ -1,0 +1,52 @@
+{
+  "offset": 0,
+  "period": "30d",
+  "rows": [
+    {
+      "agent": "pi",
+      "agentName": "Pi",
+      "cache_read": 108672,
+      "cache_write": 0,
+      "cost": 0.000648,
+      "effort": "high",
+      "ep": "/v1/chat/completions",
+      "in": 1164,
+      "model": "group/auto-deepseek-v4-1-flash",
+      "ms": 3116,
+      "out": 246,
+      "priced": true,
+      "provider": "office",
+      "providerName": "Remote magpie",
+      "req": "office/group/auto-deepseek-v4-1-flash",
+      "served": "deepseek-v4.1-flash",
+      "status": 200,
+      "stop": "tool_calls",
+      "t": "2026-10-21T11:31:16.646733864+08:00",
+      "ttft_ms": 2272
+    },
+    {
+      "agent": "pi",
+      "agentName": "Pi",
+      "cache_read": 105984,
+      "cache_write": 0,
+      "cost": 0.001466,
+      "effort": "high",
+      "ep": "/v1/chat/completions",
+      "in": 2735,
+      "model": "group/auto-deepseek-v4-1-flash",
+      "ms": 6252,
+      "out": 1230,
+      "priced": true,
+      "provider": "office",
+      "providerName": "Remote magpie",
+      "reasoning": 172,
+      "req": "office/group/auto-deepseek-v4-1-flash",
+      "served": "deepseek-v4.1-flash",
+      "status": 200,
+      "stop": "tool_calls",
+      "t": "2026-10-21T11:31:10.337831278+08:00",
+      "ttft_ms": 2216
+    }
+  ],
+  "total": 284
+}
