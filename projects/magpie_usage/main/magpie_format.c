@@ -40,7 +40,7 @@ void magpie_format_percent(float percent, bool known, char *out, size_t size)
     }
     /* Integer percent is readable at desk distance; keep one decimal only for
      * the low single digits where 1% granularity is misleading. */
-    if (percent > 0.0f && percent < 10.0f) {
+    if (percent < 10.0f) {
         snprintf(out, size, "%.1f%%", (double)percent);
     } else {
         snprintf(out, size, "%.0f%%", (double)percent);
@@ -56,21 +56,13 @@ void magpie_format_count(uint64_t value, char *out, size_t size)
         snprintf(out, size, "%llu", (unsigned long long)value);
     } else if (value < 1000000ULL) {
         const unsigned long long tenths = value / 100ULL;
-        if (tenths % 10 == 0) {
-            snprintf(out, size, "%lluK", (unsigned long long)(tenths / 10));
-        } else {
-            snprintf(out, size, "%llu.%lluK", (unsigned long long)(tenths / 10),
-                     (unsigned long long)(tenths % 10));
-        }
+        snprintf(out, size, "%llu.%lluK", (unsigned long long)(tenths / 10),
+                 (unsigned long long)(tenths % 10));
     } else if (value < 1000000000ULL) {
         const unsigned long long hundredths = value / 10000ULL;
-        if (hundredths % 100 == 0) {
-            snprintf(out, size, "%lluM", (unsigned long long)(hundredths / 100));
-        } else {
-            snprintf(out, size, "%llu.%02lluM",
-                     (unsigned long long)(hundredths / 100),
-                     (unsigned long long)(hundredths % 100));
-        }
+        snprintf(out, size, "%llu.%02lluM",
+                 (unsigned long long)(hundredths / 100),
+                 (unsigned long long)(hundredths % 100));
     } else {
         const unsigned long long hundredths = value / 10000000ULL;
         snprintf(out, size, "%llu.%02lluB",

@@ -159,10 +159,11 @@ static void test_iso8601(void)
     CHECK(magpie_parse_iso8601("2026-10-21T04:00:26Z", &without_fraction));
     CHECK(with_fraction == without_fraction);
 
-    /* Date only, treated as midnight UTC: 2026-10-21 is day 20728. */
+    /* Date only, treated as midnight UTC: 2026-10-21 is day 20747. */
     int64_t date_only = 0;
     CHECK(magpie_parse_iso8601("2026-10-21", &date_only));
-    CHECK(date_only == 20728LL * 86400LL);
+    CHECK(date_only == 20747LL * 86400LL);
+    CHECK(date_only == 1792540800LL);
 
     /* Rejections. */
     CHECK(!magpie_parse_iso8601("", &epoch));
@@ -173,7 +174,7 @@ static void test_iso8601(void)
     /* Civil-date conversion against known epochs. */
     CHECK(magpie_days_from_civil(1970, 1, 1) == 0);
     CHECK(magpie_days_from_civil(2026, 1, 1) == 20454);
-    CHECK(magpie_days_from_civil(2026, 10, 21) == 20728);
+    CHECK(magpie_days_from_civil(2026, 10, 21) == 20747);
     CHECK(magpie_days_from_civil(2000, 3, 1) == 11017);
 }
 
@@ -491,7 +492,9 @@ static void test_usage_fixture(void)
     CHECK(usage->tokens_7d == expected_7d);
     CHECK(usage->tokens_7d == 6461730ULL);
     CHECK(usage->tokens_7d > usage->tokens_today);
-    CHECK(usage->tokens_7d < usage->tokens_total);
+    /* The capture keeps only seven daily buckets, so the 7-day sum covers the
+     * whole captured series and can equal the aggregate total. */
+    CHECK(usage->tokens_7d <= usage->tokens_total);
 
     /* Oct 20 is the quiet day inside the kept window. */
     CHECK(usage->series_tokens[5] == 1020649ULL);

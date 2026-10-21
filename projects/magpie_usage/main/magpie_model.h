@@ -16,7 +16,8 @@
 #define MAGPIE_LABEL_MAX 16
 #define MAGPIE_PROVIDERS_MAX 12
 #define MAGPIE_WINDOWS_MAX 4
-#define MAGPIE_SERIES_MAX 8
+/* Daily token buckets kept for the activity strip (a full week). */
+#define MAGPIE_SERIES_MAX 7
 
 /** One quota window of one provider, e.g. "5 hours" with 16% remaining. */
 typedef struct {

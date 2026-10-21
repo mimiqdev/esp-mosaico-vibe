@@ -42,6 +42,9 @@ void mjson_init(mjson_t *json, const char *text, size_t len);
  */
 bool mjson_validate(const mjson_t *json);
 
+/** True when the next value is an object ('{'), false otherwise. */
+bool mjson_at_object(const mjson_t *json);
+
 /** Consume the '{' or '[' at the cursor and enter that container. */
 bool mjson_enter(mjson_t *json);
 

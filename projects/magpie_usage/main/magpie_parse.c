@@ -58,7 +58,10 @@ int64_t magpie_days_from_civil(int year, unsigned month, unsigned day)
     year -= month <= 2;
     const int64_t era = (year >= 0 ? year : year - 399) / 400;
     const unsigned yoe = (unsigned)(year - era * 400);
-    const unsigned doy = (153u * (month + (month > 2 ? -3 : 9)) + 2u) / 5u + day - 1u;
+    /* Signed arithmetic: month - 3 is negative for January and February. */
+    const int shifted_month = (int)month + (month > 2 ? -3 : 9);
+    const unsigned doy =
+        (153u * (unsigned)shifted_month + 2u) / 5u + day - 1u;
     const unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
     return era * 146097LL + (int64_t)doe - 719468LL;
 }
@@ -491,6 +494,11 @@ int magpie_parse_usage(const char *body, size_t len, magpie_snapshot_t *out)
     if (!mjson_validate(&json)) {
         return MAGPIE_ERR_INVALID_RESPONSE;
     }
+    if (!mjson_at_object(&json)) {
+        /* The usage document is an object; an array is not a usage report. */
+        return MAGPIE_ERR_INVALID_RESPONSE;
+    }
+
     magpie_usage_t *usage = &out->usage;
     memset(usage, 0, sizeof(*usage));
 

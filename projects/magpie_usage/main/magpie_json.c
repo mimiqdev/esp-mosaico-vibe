@@ -92,7 +92,8 @@ void mjson_init(mjson_t *json, const char *text, size_t len)
     json->depth = 0;
 }
 
-bool mjson_skip(mjson_t *json)
+/* Consumes one complete value, including nested containers. */
+static bool skip_value(mjson_t *json)
 {
     skip_space(json);
     if (at_end(json)) {
@@ -102,10 +103,64 @@ bool mjson_skip(mjson_t *json)
     if (open != '{' && open != '[') {
         return skip_scalar(json);
     }
-    if (!mjson_enter(json)) {
+    if (json->depth >= MAGPIE_JSON_DEPTH_MAX) {
         return false;
     }
-    return mjson_leave(json);
+    ++json->depth;
+    ++json->p;
+    const bool is_object = open == '{';
+    const char close = is_object ? '}' : ']';
+    skip_space(json);
+    if (!at_end(json) && *json->p == close) {
+        ++json->p;
+        --json->depth;
+        return true;
+    }
+    for (;;) {
+        skip_space(json);
+        if (at_end(json)) {
+            return false;
+        }
+        if (is_object) {
+            if (!skip_string(json)) {
+                return false;
+            }
+            skip_space(json);
+            if (at_end(json) || *json->p != ':') {
+                return false;
+            }
+            ++json->p;
+        }
+        if (!skip_value(json)) {
+            return false;
+        }
+        skip_space(json);
+        if (at_end(json)) {
+            return false;
+        }
+        if (*json->p == ',') {
+            ++json->p;
+            continue;
+        }
+        if (*json->p == close) {
+            ++json->p;
+            --json->depth;
+            return true;
+        }
+        return false;
+    }
+}
+
+bool mjson_skip(mjson_t *json)
+{
+    return skip_value(json);
+}
+
+bool mjson_at_object(const mjson_t *json)
+{
+    mjson_t probe = *json;
+    skip_space(&probe);
+    return !at_end(&probe) && *probe.p == '{';
 }
 
 bool mjson_enter(mjson_t *json)
@@ -133,14 +188,17 @@ bool mjson_leave(mjson_t *json)
         if (at_end(json)) {
             return false;
         }
-        if (*json->p == '}' || *json->p == ']') {
+        const char c = *json->p;
+        if (c == '}' || c == ']') {
             ++json->p;
             if (json->depth) {
                 --json->depth;
             }
             return true;
         }
-        if (*json->p == ',') {
+        /* Tolerate a partially walked object or array: separators and the
+         * member colon are consumed here, values by skip_value(). */
+        if (c == ',' || c == ':') {
             ++json->p;
             continue;
         }
@@ -361,7 +419,7 @@ void mjson_read_number_lenient(mjson_t *json, double *out)
 bool mjson_validate(const mjson_t *json)
 {
     mjson_t probe = *json;
-    if (!mjson_skip(&probe)) {
+    if (!skip_value(&probe)) {
         return false;
     }
     skip_space(&probe);
