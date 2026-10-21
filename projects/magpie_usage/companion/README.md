@@ -115,6 +115,15 @@ The payload builder and the HTTP endpoint need only the standard library; the
 BLE tests import `dbus-next` and are skipped when it is missing. They never
 touch a real adapter.
 
+`dbus-next` is not installed on this host and `dbus-python` (a different
+binding) is not a substitute. The BLE tests were therefore also run against a
+`pip --target` copy of `dbus-next` to exercise the mocked-D-Bus paths:
+
+```sh
+python3 -m pip install --target /tmp/magpie-deps dbus-next
+PYTHONPATH=/tmp/magpie-deps python3 -m unittest discover -s tests   # no skips
+```
+
 ## Security notes
 
 * Magpie itself is never bound to the LAN and no Magpie gateway key exists on
