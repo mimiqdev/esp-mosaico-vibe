@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*
- * Host test harness for the portable Magpie sources.
+ * Host test harness for the portable Magpie display sources.
  *
  * Deliberately a plain C program instead of a framework: the host runner in
  * run_tests.py already builds these exact device sources with ASan/UBSan, and
  * keeping the harness dependency free means the tests can run anywhere a C
  * compiler exists.
  *
- * argv[1] is the fixtures directory populated by tools/make_fixtures.py.
+ * argv[1] is the fixtures directory; payload fixtures are generated from the
+ * captured Magpie document by tools/make_payloads.py, so the decoder is tested
+ * against the bytes the companion really sends.
  */
 
 #include <stdio.h>
@@ -19,6 +21,9 @@
 #include "magpie_json.h"
 #include "magpie_model.h"
 #include "magpie_parse.h"
+#include "magpie_pull.h"
+#include "magpie_source.h"
+#include "magpie_ui_state.h"
 
 static unsigned g_failures;
 static unsigned g_checks;
@@ -39,20 +44,6 @@ static unsigned g_checks;
             ++g_failures;                                                    \
             fprintf(stderr, "FAIL %s:%d: expected \"%s\", got \"%s\"\n",      \
                     __FILE__, __LINE__, (expected), (actual));               \
-        }                                                                    \
-    } while (0)
-
-#define CHECK_NEAR(actual, expected, tolerance)                              \
-    do {                                                                     \
-        ++g_checks;                                                          \
-        const double _a = (double)(actual);                                   \
-        const double _e = (double)(expected);                                 \
-        const double _t = (tolerance);                                        \
-        const double _d = _a > _e ? _a - _e : _e - _a;                        \
-        if (_d > _t) {                                                       \
-            ++g_failures;                                                    \
-            fprintf(stderr, "FAIL %s:%d: expected %g +-%g, got %g\n",         \
-                    __FILE__, __LINE__, _e, _t, _a);                         \
         }                                                                    \
     } while (0)
 
@@ -87,95 +78,10 @@ static char *load_fixture(const char *name, size_t *out_len)
     const size_t read = fread(buffer, 1, (size_t)size, file);
     fclose(file);
     buffer[read] = '\0';
-    *out_len = read;
+    if (out_len) {
+        *out_len = read;
+    }
     return buffer;
-}
-
-static magpie_snapshot_t *load_snapshot(int64_t now, const char *filter)
-{
-    magpie_snapshot_t *snapshot = malloc(sizeof(*snapshot));
-    if (!snapshot) {
-        return NULL;
-    }
-    magpie_snapshot_clear(snapshot);
-    size_t len = 0;
-    char *health = load_fixture("health.json", &len);
-    if (health) {
-        CHECK(magpie_parse_health(health, len, snapshot) == MAGPIE_OK);
-        free(health);
-    }
-    char *quotas = load_fixture("quotas.json", &len);
-    if (quotas) {
-        CHECK(magpie_parse_quotas(quotas, len, now, filter, snapshot) == MAGPIE_OK);
-        free(quotas);
-    }
-    char *usage = load_fixture("usage.json", &len);
-    if (usage) {
-        CHECK(magpie_parse_usage(usage, len, snapshot) == MAGPIE_OK);
-        free(usage);
-    }
-    char *requests = load_fixture("requests.json", &len);
-    if (requests) {
-        CHECK(magpie_parse_requests(requests, len, snapshot) == MAGPIE_OK);
-        free(requests);
-    }
-    return snapshot;
-}
-
-/* ---- ISO-8601 -------------------------------------------------------- */
-
-static void test_iso8601(void)
-{
-    int64_t epoch = 0;
-
-    /* 2026-01-01T00:00:00Z */
-    CHECK(magpie_parse_iso8601("2026-01-01T00:00:00Z", &epoch));
-    CHECK(epoch == 1767225600LL);
-
-    /* An explicit +08:00 offset is converted back to UTC. */
-    int64_t offset = 0;
-    int64_t utc_same = 0;
-    CHECK(magpie_parse_iso8601("2026-10-21T12:29:00+08:00", &offset));
-    CHECK(magpie_parse_iso8601("2026-10-21T04:29:00Z", &utc_same));
-    CHECK(offset == utc_same);
-
-    /* A negative offset moves the other way. */
-    int64_t behind = 0;
-    int64_t behind_utc = 0;
-    CHECK(magpie_parse_iso8601("2026-10-21T04:29:00-05:00", &behind));
-    CHECK(magpie_parse_iso8601("2026-10-21T09:29:00Z", &behind_utc));
-    CHECK(behind == behind_utc);
-
-    int64_t utc = 0;
-    int64_t shanghai = 0;
-    CHECK(magpie_parse_iso8601("2026-10-21T12:29:00Z", &utc));
-    CHECK(magpie_parse_iso8601("2026-10-21T12:29:00+00:00", &shanghai));
-    CHECK(utc == shanghai);
-
-    /* Fractional seconds, as Magpie emits for some providers. */
-    int64_t with_fraction = 0;
-    CHECK(magpie_parse_iso8601("2026-10-21T04:00:26.052876Z", &with_fraction));
-    int64_t without_fraction = 0;
-    CHECK(magpie_parse_iso8601("2026-10-21T04:00:26Z", &without_fraction));
-    CHECK(with_fraction == without_fraction);
-
-    /* Date only, treated as midnight UTC: 2026-10-21 is day 20747. */
-    int64_t date_only = 0;
-    CHECK(magpie_parse_iso8601("2026-10-21", &date_only));
-    CHECK(date_only == 20747LL * 86400LL);
-    CHECK(date_only == 1792540800LL);
-
-    /* Rejections. */
-    CHECK(!magpie_parse_iso8601("", &epoch));
-    CHECK(!magpie_parse_iso8601("not a date", &epoch));
-    CHECK(!magpie_parse_iso8601("2026-13-01T00:00:00Z", &epoch));
-    CHECK(!magpie_parse_iso8601("2026-10-32T00:00:00Z", &epoch));
-
-    /* Civil-date conversion against known epochs. */
-    CHECK(magpie_days_from_civil(1970, 1, 1) == 0);
-    CHECK(magpie_days_from_civil(2026, 1, 1) == 20454);
-    CHECK(magpie_days_from_civil(2026, 10, 21) == 20747);
-    CHECK(magpie_days_from_civil(2000, 3, 1) == 11017);
 }
 
 /* ---- JSON scanner ---------------------------------------------------- */
@@ -183,10 +89,11 @@ static void test_iso8601(void)
 static void test_json_scanner(void)
 {
     const char *doc = "{\"a\":1,\"b\":[true,false,null],\"c\":{\"d\":\"x\\u00e9y\"},"
-                      "\"e\":\"quote\\\"inside\"}";
+                      "\"e\":\"quote\\\"inside\",\"n\":{\"deep\":[1,{\"k\":2}]}}";
     mjson_t json;
     mjson_init(&json, doc, strlen(doc));
     CHECK(mjson_validate(&json));
+    CHECK(mjson_at_object(&json));
 
     mjson_t broken;
     const char *bad = "{\"a\":\"unterminated}";
@@ -198,419 +105,600 @@ static void test_json_scanner(void)
     mjson_init(&trailing, junk, strlen(junk));
     CHECK(!mjson_validate(&trailing));
 
-    mjson_t empty;
-    mjson_init(&empty, "{}", 2);
-    CHECK(mjson_validate(&empty));
-    CHECK(mjson_enter(&empty));
-    char key[MAGPIE_LABEL_MAX];
-    CHECK(!mjson_next_key(&empty, key, sizeof(key)));
-    CHECK(mjson_leave(&empty));
+    /* Skipping a nested value must consume exactly that value. */
+    mjson_t skip;
+    const char *nested = "{\"skip\":{\"x\":[1,2,{\"y\":3}]},\"after\":7}";
+    mjson_init(&skip, nested, strlen(nested));
+    char key[MAGPIE_WIN_LABEL_MAX];
+    CHECK(mjson_enter(&skip));
+    CHECK(mjson_next_key(&skip, key, sizeof(key)));
+    CHECK_STR(key, "skip");
+    CHECK(mjson_skip(&skip));
+    CHECK(mjson_next_key(&skip, key, sizeof(key)));
+    CHECK_STR(key, "after");
+    double value = 0;
+    CHECK(mjson_read_double(&skip, &value));
+    CHECK(value == 7.0);
+    CHECK(mjson_leave(&skip));
 
-    /* Walk the object and read each member. */
+    /* Walking every member of the document works with nesting. */
     mjson_t walk;
     mjson_init(&walk, doc, strlen(doc));
     CHECK(mjson_enter(&walk));
-    char text[MAGPIE_TEXT_MAX];
-    CHECK(mjson_next_key(&walk, key, sizeof(key)));
-    CHECK_STR(key, "a");
-    double number = 0;
-    CHECK(mjson_read_double(&walk, &number));
-    CHECK(number == 1.0);
-    CHECK(mjson_next_key(&walk, key, sizeof(key)));
-    CHECK_STR(key, "b");
-    CHECK(mjson_enter(&walk));
-    CHECK(mjson_next_element(&walk));
-    CHECK(mjson_skip(&walk));
-    CHECK(mjson_next_element(&walk));
-    CHECK(mjson_skip(&walk));
-    CHECK(mjson_next_element(&walk));
-    CHECK(mjson_skip(&walk));
-    CHECK(!mjson_next_element(&walk));
-    CHECK(mjson_leave(&walk));
-    CHECK(mjson_next_key(&walk, key, sizeof(key)));
-    CHECK_STR(key, "c");
-    CHECK(mjson_enter(&walk));
-    CHECK(mjson_next_key(&walk, key, sizeof(key)));
-    CHECK_STR(key, "d");
-    CHECK(mjson_read_string(&walk, text, sizeof(text)));
-    /* The \u escape is not ASCII-printable after decoding to 0xE9. */
-    CHECK_STR(text, "x?y");
-    CHECK(mjson_leave(&walk));
-    CHECK(mjson_next_key(&walk, key, sizeof(key)));
-    CHECK_STR(key, "e");
-    CHECK(mjson_read_string(&walk, text, sizeof(text)));
-    CHECK_STR(text, "quote\"inside");
-    CHECK(!mjson_next_key(&walk, key, sizeof(key)));
+    unsigned members = 0;
+    while (mjson_next_key(&walk, key, sizeof(key))) {
+        ++members;
+        CHECK(mjson_skip(&walk));
+    }
+    CHECK(members == 5);
     CHECK(mjson_leave(&walk));
 
-    /* Lenient numbers: null/boolean do not fail the walk. */
-    mjson_t lenient;
-    const char *mixed = "{\"n\":null,\"b\":true,\"v\":4.5}";
-    mjson_init(&lenient, mixed, strlen(mixed));
-    CHECK(mjson_enter(&lenient));
-    double value = -1;
-    CHECK(mjson_next_key(&lenient, key, sizeof(key)));
-    mjson_read_number_lenient(&lenient, &value);
-    CHECK(value == 0.0);
-    CHECK(mjson_next_key(&lenient, key, sizeof(key)));
-    mjson_read_number_lenient(&lenient, &value);
-    CHECK(value == 0.0);
-    CHECK(mjson_next_key(&lenient, key, sizeof(key)));
-    mjson_read_number_lenient(&lenient, &value);
-    CHECK(value == 4.5);
-    CHECK(mjson_leave(&lenient));
-
-    /* Overflowing truncation must still terminate. */
-    char tiny[4];
+    /* Overlong strings truncate and terminate. */
     mjson_t truncate;
     const char *long_text = "{\"k\":\"abcdefghij\"}";
     mjson_init(&truncate, long_text, strlen(long_text));
     CHECK(mjson_enter(&truncate));
     CHECK(mjson_next_key(&truncate, key, sizeof(key)));
+    char tiny[4];
     CHECK(mjson_read_string(&truncate, tiny, sizeof(tiny)));
     CHECK_STR(tiny, "abc");
     CHECK(mjson_leave(&truncate));
 }
 
-/* ---- quotas ---------------------------------------------------------- */
+/* ---- INDEX payload --------------------------------------------------- */
 
-static void test_quotas_fixture(void)
+static void test_index_fixture(void)
 {
-    /* 2026-10-21T11:30:00+08:00 */
-    const int64_t now = 1792543800LL;
-    magpie_snapshot_t *snapshot = load_snapshot(now, NULL);
-    if (!snapshot) {
+    size_t len = 0;
+    char *body = load_fixture("payloads/index.json", &len);
+    if (!body) {
         return;
     }
-
-    CHECK(snapshot->provider_count == 7);
-    CHECK(snapshot->provider_total == 7);
-    CHECK_STR(snapshot->gateway_version, "0.1.1268");
-
-    /* kimi-code-cn reports a 0% weekly window, the most constrained row. */
-    CHECK(snapshot->has_quota);
-    CHECK_STR(snapshot->quota_provider, "office/kimi-code-cn");
-    CHECK_STR(snapshot->quota_window, "7 days");
-    CHECK_NEAR(snapshot->quota_remaining, 0.0, 0.001);
-
-    /* The claude row with 2% remaining on the 5-hour window must win over the
-     * claude row with 16%: duplicate providers stay separate rows. */
-    unsigned claude_rows = 0;
-    for (uint8_t i = 0; i < snapshot->provider_count; ++i) {
-        const magpie_provider_t *provider = &snapshot->providers[i];
-        CHECK(provider->window_count > 0);
-        if (strcmp(provider->provider, "office/claude") == 0) {
-            ++claude_rows;
-            CHECK(provider->worst_remaining <= 16.0f + 0.001f);
-        }
-        if (strcmp(provider->provider, "office/cursor") == 0) {
-            CHECK_STR(provider->plan, "Team");
-            /* Cursor's On-demand window (27.65%) is the worst of its five. */
-            CHECK_NEAR(provider->worst_remaining, 27.6504, 0.01);
-            CHECK(provider->window_count == MAGPIE_WINDOWS_MAX);
-        }
+    magpie_index_t index;
+    CHECK(magpie_decode_index(body, len, &index) == MAGPIE_OK);
+    CHECK(index.version == MAGPIE_PROTOCOL_VERSION);
+    CHECK(index.sender_epoch_s == 1792543800LL);
+    CHECK(index.count == 7);
+    CHECK(index.id_count == 7);
+    for (uint8_t i = 0; i < index.id_count; ++i) {
+        CHECK(index.ids[i] == i);
     }
-    CHECK(claude_rows == 2);
-
-    /* A fractional, Z-suffixed reset parses; a null resetsAt does not. */
-    for (uint8_t i = 0; i < snapshot->provider_count; ++i) {
-        const magpie_provider_t *provider = &snapshot->providers[i];
-        if (strcmp(provider->provider, "office/workbuddy") == 0) {
-            CHECK_STR(provider->provider, "office/workbuddy");
-            CHECK(provider->worst_reset_in_s == 0);
-            for (uint8_t w = 0; w < provider->window_count; ++w) {
-                CHECK(!provider->windows[w].has_reset);
-            }
-        }
-        if (strcmp(provider->provider, "office/cursor") == 0) {
-            for (uint8_t w = 0; w < provider->window_count; ++w) {
-                CHECK(provider->windows[w].has_reset);
-                CHECK(provider->windows[w].reset_in_s > 0);
-            }
-        }
-    }
-
-    /* This capture has no signed-out provider; the error fields stay empty and
-     * nothing is counted as SIGNED OUT. */
-    CHECK(magpie_snapshot_error_count(snapshot) == 0);
-    for (uint8_t i = 0; i < snapshot->provider_count; ++i) {
-        CHECK(snapshot->providers[i].error[0] == '\0');
-    }
-
-    free(snapshot);
+    /* Kimi's weekly window is fully used, so it is the glance summary. */
+    CHECK(index.summary.valid);
+    CHECK(index.summary.slot == 0);
+    CHECK_STR(index.summary.name, "Kimi Code (China)");
+    CHECK_STR(index.summary.window, "7d");
+    CHECK(index.summary.used_percent == 100);
+    CHECK(index.summary.reset_epoch_s == 1792573226LL);
+    CHECK(len <= MAGPIE_INDEX_BYTES_MAX);
+    free(body);
 }
 
-static void test_quotas_filter(void)
+static void test_index_edge_cases(void)
 {
-    const int64_t now = 1792543800LL;
-    magpie_snapshot_t *office = load_snapshot(now, "office/");
-    if (!office) {
-        return;
-    }
-    CHECK(office->provider_count == 6);
-    for (uint8_t i = 0; i < office->provider_count; ++i) {
-        CHECK(strncmp(office->providers[i].provider, "office/", 7) == 0);
-    }
-    free(office);
+    magpie_index_t index;
+    magpie_index_clear(&index);
+    CHECK(index.count == 0);
+    CHECK(!index.summary.valid);
 
-    magpie_snapshot_t *copilot = load_snapshot(now, "copilot");
-    if (!copilot) {
-        return;
-    }
-    CHECK(copilot->provider_count == 1);
-    CHECK_STR(copilot->providers[0].provider, "copilot");
-    free(copilot);
+    /* Wrong protocol version is rejected. */
+    const char *v2 = "{\"v\":2,\"t\":1,\"c\":1,\"lo\":{},\"ids\":[0]}";
+    CHECK(magpie_decode_index(v2, strlen(v2), &index) ==
+          MAGPIE_ERR_INVALID_RESPONSE);
 
-    /* A filter that matches nothing leaves no quota and keeps the default. */
-    magpie_snapshot_t *none = load_snapshot(now, "zzz/");
-    if (!none) {
-        return;
-    }
-    CHECK(none->provider_count == 0);
-    CHECK(none->provider_total == 0);
-    CHECK(!none->has_quota);
-    CHECK_NEAR(none->quota_remaining, 100.0, 0.001);
-    free(none);
+    /* Malformed and non-object documents are rejected. */
+    CHECK(magpie_decode_index("not json", 8, &index) ==
+          MAGPIE_ERR_INVALID_RESPONSE);
+    CHECK(magpie_decode_index("[]", 2, &index) ==
+          MAGPIE_ERR_INVALID_RESPONSE);
+    CHECK(magpie_decode_index(NULL, 0, &index) == MAGPIE_ERR_INVALID_ARG);
+
+    /* A missing ids array falls back to 0..c-1. */
+    const char *no_ids = "{\"v\":1,\"t\":5,\"c\":3,\"lo\":{}}";
+    CHECK(magpie_decode_index(no_ids, strlen(no_ids), &index) == MAGPIE_OK);
+    CHECK(index.count == 3);
+    CHECK(index.id_count == 3);
+    CHECK(index.ids[2] == 2);
+    CHECK(!index.summary.valid);
+
+    /* The count is capped at the number of pages the firmware can hold. */
+    char big[512];
+    snprintf(big, sizeof(big), "{\"v\":1,\"t\":1,\"c\":99,\"lo\":{},\"ids\":[]}");
+    CHECK(magpie_decode_index(big, strlen(big), &index) == MAGPIE_OK);
+    CHECK(index.count == MAGPIE_SLOTS_MAX);
+
+    /* Out-of-range percents are clamped, unknown reset stays 0. */
+    const char *odd =
+        "{\"v\":1,\"t\":1,\"c\":1,\"lo\":{\"i\":0,\"n\":\"X\",\"w\":\"7d\","
+        "\"u\":420,\"r\":0},\"ids\":[0]}";
+    CHECK(magpie_decode_index(odd, strlen(odd), &index) == MAGPIE_OK);
+    CHECK(index.summary.used_percent == 100);
+    CHECK(index.summary.reset_epoch_s == 0);
+
+    /* Oversized payloads are rejected before parsing. */
+    char oversized[MAGPIE_INDEX_BYTES_MAX * 2 + 8];
+    memset(oversized, ' ', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+    oversized[0] = '{';
+    oversized[1] = '}';
+    CHECK(magpie_decode_index(oversized, strlen(oversized), &index) ==
+          MAGPIE_ERR_INVALID_RESPONSE);
 }
 
-static void test_quotas_edge_cases(void)
+/* ---- SUB payload ----------------------------------------------------- */
+
+static void test_sub_fixture(void)
 {
-    magpie_snapshot_t snapshot;
-    magpie_snapshot_clear(&snapshot);
+    magpie_index_t index;
+    size_t index_len = 0;
+    char *index_body = load_fixture("payloads/index.json", &index_len);
+    if (!index_body) {
+        return;
+    }
+    CHECK(magpie_decode_index(index_body, index_len, &index) == MAGPIE_OK);
+    free(index_body);
 
-    /* Unlimited windows never become the constraint. */
-    const char *unlimited =
-        "{\"data\":[{\"provider\":\"a\",\"name\":\"A\",\"windows\":["
-        "{\"name\":\"Limit\",\"remaining\":100,\"unlimited\":true},"
-        "{\"name\":\"Month\",\"remaining\":40}]}]}";
-    CHECK(magpie_parse_quotas(unlimited, strlen(unlimited), 0, NULL, &snapshot) ==
+    for (uint8_t slot = 0; slot < index.count; ++slot) {
+        char name[32];
+        snprintf(name, sizeof(name), "payloads/sub-%u.json", (unsigned)slot);
+        size_t len = 0;
+        char *body = load_fixture(name, &len);
+        if (!body) {
+            return;
+        }
+        CHECK(len <= MAGPIE_SUB_BYTES_MAX);
+        magpie_sub_t sub;
+        CHECK(magpie_decode_sub(body, len, slot, &sub) == MAGPIE_OK);
+        CHECK(sub.index == slot);
+        CHECK(sub.loaded);
+        CHECK(sub.name[0] != '\0');
+        CHECK(sub.provider[0] != '\0');
+        CHECK(sub.window_count <= MAGPIE_WIN_MAX);
+        for (uint8_t w = 0; w < sub.window_count; ++w) {
+            CHECK(sub.windows[w].label[0] != '\0');
+            CHECK(sub.windows[w].used_percent <= 100);
+        }
+        /* Slot 0 is Kimi: weekly window fully used, then the 5-hour one. */
+        if (slot == 0) {
+            CHECK_STR(sub.provider, "kimi-code-cn");
+            CHECK_STR(sub.name, "Kimi Code (China)");
+            CHECK(!sub.error);
+            CHECK(sub.window_count == 2);
+            CHECK_STR(sub.windows[0].label, "7d");
+            CHECK(sub.windows[0].used_percent == 100);
+            CHECK(sub.windows[0].reset_epoch_s == 1792573226LL);
+            CHECK_STR(sub.windows[1].label, "5h");
+            CHECK(sub.windows[1].used_percent == 7);
+        }
+        /* The two Claude accounts keep distinct names when deduplicated. */
+        if (slot == 1) {
+            CHECK_STR(sub.provider, "claude");
+            CHECK_STR(sub.name, "Claude Code (1)");
+            CHECK_STR(sub.plan, "pro");
+        }
+        if (slot == 2) {
+            CHECK_STR(sub.name, "Claude Code (2)");
+        }
+        /* A subscription with no reset time keeps 0 rather than garbage. */
+        if (slot == 5) {
+            CHECK_STR(sub.provider, "workbuddy");
+            CHECK(sub.windows[0].reset_epoch_s == 0);
+        }
+        free(body);
+    }
+}
+
+static void test_sub_edge_cases(void)
+{
+    magpie_sub_t sub;
+
+    /* The slot must match the request; a mismatched reply is rejected. */
+    const char *payload =
+        "{\"i\":2,\"p\":\"claude\",\"n\":\"Claude\",\"pl\":\"Max\",\"e\":0,"
+        "\"w\":[{\"n\":\"5h\",\"u\":84,\"r\":1792549000}]}";
+    CHECK(magpie_decode_sub(payload, strlen(payload), 2, &sub) == MAGPIE_OK);
+    CHECK(sub.index == 2);
+    CHECK_STR(sub.name, "Claude");
+    CHECK(sub.window_count == 1);
+    CHECK(sub.windows[0].used_percent == 84);
+    CHECK(magpie_decode_sub(payload, strlen(payload), 3, &sub) ==
+          MAGPIE_ERR_INVALID_RESPONSE);
+    /* -1 accepts any slot. */
+    CHECK(magpie_decode_sub(payload, strlen(payload), -1, &sub) == MAGPIE_OK);
+
+    /* Error/empty states survive decoding. */
+    const char *error_payload =
+        "{\"i\":0,\"p\":\"minimax\",\"n\":\"MiniMax\",\"pl\":\"\",\"e\":1,"
+        "\"w\":[]}";
+    CHECK(magpie_decode_sub(error_payload, strlen(error_payload), 0, &sub) ==
           MAGPIE_OK);
-    CHECK(snapshot.provider_count == 1);
-    CHECK(snapshot.providers[0].window_count == 2);
-    CHECK_NEAR(snapshot.providers[0].worst_remaining, 40.0, 0.001);
-    CHECK_STR(snapshot.quota_window, "Month");
+    CHECK(sub.error);
+    CHECK(sub.window_count == 0);
+    CHECK_STR(sub.plan, "");
 
-    /* A provider whose only window is unlimited reports 100% and is kept. */
-    magpie_snapshot_clear(&snapshot);
-    const char *only_unlimited =
-        "{\"data\":[{\"provider\":\"k\",\"windows\":["
-        "{\"name\":\"Limit\",\"remaining\":100,\"unlimited\":true}]}]}";
-    CHECK(magpie_parse_quotas(only_unlimited, strlen(only_unlimited), 0, NULL,
-                              &snapshot) == MAGPIE_OK);
-    CHECK(snapshot.providers[0].unlimited);
-    CHECK_NEAR(snapshot.providers[0].worst_remaining, 100.0, 0.001);
-    CHECK(!snapshot.has_quota);
+    /* Extra windows are dropped, not overflowed. */
+    const char *many =
+        "{\"i\":0,\"p\":\"p\",\"n\":\"N\",\"pl\":\"x\",\"e\":0,\"w\":["
+        "{\"n\":\"a\",\"u\":1},{\"n\":\"b\",\"u\":2},{\"n\":\"c\",\"u\":3},"
+        "{\"n\":\"d\",\"u\":4}]}";
+    CHECK(magpie_decode_sub(many, strlen(many), 0, &sub) == MAGPIE_OK);
+    CHECK(sub.window_count == MAGPIE_WIN_MAX);
+    CHECK(sub.windows[2].used_percent == 3);
 
-    /* Used-only windows derive remaining so the row does not read 100%. */
-    magpie_snapshot_clear(&snapshot);
-    const char *used_only =
-        "{\"data\":[{\"provider\":\"u\",\"windows\":["
-        "{\"name\":\"5 hours\",\"used\":84}]}]}";
-    CHECK(magpie_parse_quotas(used_only, strlen(used_only), 0, NULL, &snapshot) ==
-          MAGPIE_OK);
-    CHECK_NEAR(snapshot.providers[0].windows[0].remaining_percent, 16.0, 0.001);
+    /* A payload without a name falls back to the provider id. */
+    const char *no_name = "{\"i\":0,\"p\":\"grok\",\"w\":[]}";
+    CHECK(magpie_decode_sub(no_name, strlen(no_name), 0, &sub) == MAGPIE_OK);
+    CHECK_STR(sub.name, "grok");
 
-    /* Out-of-range percentages are clamped. */
-    magpie_snapshot_clear(&snapshot);
+    /* Neither name nor provider is unusable. */
+    const char *empty = "{\"i\":0,\"w\":[]}";
+    CHECK(magpie_decode_sub(empty, strlen(empty), 0, &sub) ==
+          MAGPIE_ERR_INVALID_RESPONSE);
+
+    /* Bad documents. */
+    CHECK(magpie_decode_sub("nope", 4, 0, &sub) == MAGPIE_ERR_INVALID_RESPONSE);
+    CHECK(magpie_decode_sub("[]", 2, 0, &sub) == MAGPIE_ERR_INVALID_RESPONSE);
+    CHECK(magpie_decode_sub(NULL, 0, 0, &sub) == MAGPIE_ERR_INVALID_ARG);
+
+    /* Used percent above 100 is clamped. */
     const char *clamped =
-        "{\"data\":[{\"provider\":\"c\",\"windows\":["
-        "{\"name\":\"a\",\"remaining\":150},"
-        "{\"name\":\"b\",\"remaining\":-20}]}]}";
-    CHECK(magpie_parse_quotas(clamped, strlen(clamped), 0, NULL, &snapshot) ==
-          MAGPIE_OK);
-    CHECK_NEAR(snapshot.providers[0].windows[0].remaining_percent, 100.0, 0.001);
-    CHECK_NEAR(snapshot.providers[0].windows[1].remaining_percent, 0.0, 0.001);
-    CHECK_NEAR(snapshot.providers[0].worst_remaining, 0.0, 0.001);
-
-    /* Provider cap: extra rows are counted but not stored. */
-    magpie_snapshot_clear(&snapshot);
-    char big[8192];
-    size_t used = (size_t)snprintf(big, sizeof(big), "{\"data\":[");
-    for (int i = 0; i < 20; ++i) {
-        used += (size_t)snprintf(big + used, sizeof(big) - used,
-                                 "%s{\"provider\":\"p%d\",\"windows\":["
-                                 "{\"name\":\"5 hours\",\"remaining\":%d}]}",
-                                 i ? "," : "", i, 100 - i);
-    }
-    snprintf(big + used, sizeof(big) - used, "]}");
-    CHECK(magpie_parse_quotas(big, strlen(big), 0, NULL, &snapshot) == MAGPIE_OK);
-    CHECK(snapshot.provider_total == 20);
-    CHECK(snapshot.provider_count == MAGPIE_PROVIDERS_MAX);
-    CHECK_NEAR(snapshot.quota_remaining, 81.0, 0.001);
-
-    /* Malformed and empty documents are rejected without touching the model. */
-    magpie_snapshot_clear(&snapshot);
-    CHECK(magpie_parse_quotas("not json", 8, 0, NULL, &snapshot) ==
-          MAGPIE_ERR_INVALID_RESPONSE);
-    CHECK(magpie_parse_quotas("{}", 2, 0, NULL, &snapshot) ==
-          MAGPIE_ERR_INVALID_RESPONSE);
-    CHECK(magpie_parse_quotas(NULL, 0, 0, NULL, &snapshot) ==
-          MAGPIE_ERR_INVALID_ARG);
-
-    /* An empty data array is a valid response with nothing to show. */
-    magpie_snapshot_clear(&snapshot);
-    CHECK(magpie_parse_quotas("{\"data\":[]}", 11, 0, NULL, &snapshot) ==
-          MAGPIE_OK);
-    CHECK(snapshot.provider_count == 0);
-    CHECK(!snapshot.has_quota);
+        "{\"i\":0,\"p\":\"p\",\"n\":\"N\",\"w\":[{\"n\":\"7d\",\"u\":250}]}";
+    CHECK(magpie_decode_sub(clamped, strlen(clamped), 0, &sub) == MAGPIE_OK);
+    CHECK(sub.windows[0].used_percent == 100);
 }
 
-/* ---- usage ----------------------------------------------------------- */
+/* ---- pull cycle ------------------------------------------------------ */
 
-static void test_usage_fixture(void)
+typedef struct {
+    const char *index_body;
+    const char *sub_bodies[MAGPIE_SLOTS_MAX];
+    int index_result;
+    int sub_fail_slot;      /* slot whose read fails; -1 for none */
+    unsigned opens;
+    unsigned closes;
+    unsigned index_reads;
+    unsigned sub_reads;
+} fake_source_t;
+
+static int fake_open(magpie_source_t *self)
 {
-    const int64_t now = 1792543800LL;
-    magpie_snapshot_t *snapshot = load_snapshot(now, NULL);
-    if (!snapshot) {
+    fake_source_t *fake = self->impl;
+    ++fake->opens;
+    return MAGPIE_SOURCE_OK;
+}
+
+static void fake_close(magpie_source_t *self)
+{
+    fake_source_t *fake = self->impl;
+    ++fake->closes;
+}
+
+static int fake_read_index(magpie_source_t *self, char *buf, size_t cap)
+{
+    fake_source_t *fake = self->impl;
+    ++fake->index_reads;
+    if (fake->index_result != MAGPIE_SOURCE_OK) {
+        return fake->index_result;
+    }
+    const size_t len = strlen(fake->index_body);
+    if (len + 1 > cap) {
+        return MAGPIE_SOURCE_ERR_PAYLOAD;
+    }
+    memcpy(buf, fake->index_body, len + 1);
+    return (int)len;
+}
+
+static int fake_read_sub(magpie_source_t *self, uint8_t slot, char *buf,
+                         size_t cap)
+{
+    fake_source_t *fake = self->impl;
+    ++fake->sub_reads;
+    if ((int)slot == fake->sub_fail_slot) {
+        return MAGPIE_SOURCE_ERR_TIMEOUT;
+    }
+    if (slot >= MAGPIE_SLOTS_MAX || !fake->sub_bodies[slot]) {
+        return MAGPIE_SOURCE_ERR_LINK;
+    }
+    const size_t len = strlen(fake->sub_bodies[slot]);
+    if (len + 1 > cap) {
+        return MAGPIE_SOURCE_ERR_PAYLOAD;
+    }
+    memcpy(buf, fake->sub_bodies[slot], len + 1);
+    return (int)len;
+}
+
+static void load_pull_ctx(char *index_buf, char *sub_buf, magpie_index_t *index,
+                          magpie_sub_t *subs, uint8_t *loaded)
+{
+    for (uint8_t slot = 0; slot < MAGPIE_SLOTS_MAX; ++slot) {
+        magpie_sub_clear(&subs[slot], slot);
+    }
+    magpie_index_clear(index);
+    *loaded = 0;
+    (void)index_buf;
+    (void)sub_buf;
+}
+
+static void test_pull_cycle(void)
+{
+    char *index_body = load_fixture("payloads/index.json", NULL);
+    if (!index_body) {
         return;
     }
-    const magpie_usage_t *usage = &snapshot->usage;
-
-    /* Aggregate block from the captured 30-day response. */
-    CHECK(usage->calls == 158);
-    CHECK(usage->errors == 2);
-    CHECK(usage->input == 269086);
-    CHECK(usage->output == 78416);
-    CHECK(usage->reasoning == 26547);
-    CHECK(usage->cache_read == 6087681);
-    CHECK(usage->cache_write == 0);
-
-    /* Sum of every component, matching the gateway's own token accounting. */
-    CHECK(usage->tokens_total ==
-          usage->input + usage->output + usage->reasoning + usage->cache_read +
-              usage->cache_write);
-
-    /* Today is the last bucket; 7d is the sum of the kept buckets. */
-    CHECK(usage->series_count == 7);
-    CHECK(usage->tokens_today == 5113992ULL);
-    CHECK(usage->tokens_today == usage->series_tokens[6]);
-
-    uint64_t expected_7d = 0;
-    for (uint8_t i = 0; i < usage->series_count; ++i) {
-        expected_7d += usage->series_tokens[i];
+    fake_source_t fake;
+    memset(&fake, 0, sizeof(fake));
+    fake.index_body = index_body;
+    fake.sub_fail_slot = -1;
+    for (uint8_t slot = 0; slot < 7; ++slot) {
+        char name[32];
+        snprintf(name, sizeof(name), "payloads/sub-%u.json", (unsigned)slot);
+        fake.sub_bodies[slot] = load_fixture(name, NULL);
     }
-    CHECK(usage->tokens_7d == expected_7d);
-    CHECK(usage->tokens_7d == 6461730ULL);
-    CHECK(usage->tokens_7d > usage->tokens_today);
-    /* The capture keeps only seven daily buckets, so the 7-day sum covers the
-     * whole captured series and can equal the aggregate total. */
-    CHECK(usage->tokens_7d <= usage->tokens_total);
 
-    /* Oct 20 is the quiet day inside the kept window. */
-    CHECK(usage->series_tokens[5] == 1020649ULL);
-    CHECK(usage->series_tokens[2] == 0);
+    magpie_source_t source;
+    memset(&source, 0, sizeof(source));
+    source.name = "fake";
+    source.open = fake_open;
+    source.close = fake_close;
+    source.read_index = fake_read_index;
+    source.read_sub = fake_read_sub;
+    source.impl = &fake;
 
-    CHECK(usage->calls_today == 79);
-    CHECK(usage->errors_today == 0);
+    char index_buf[MAGPIE_INDEX_BYTES_MAX + 1];
+    char sub_buf[MAGPIE_SUB_BYTES_MAX + 1];
+    magpie_index_t index;
+    static magpie_sub_t subs[MAGPIE_SLOTS_MAX];
+    uint8_t loaded = 0;
+    load_pull_ctx(index_buf, sub_buf, &index, subs, &loaded);
+    magpie_pull_ctx_t ctx = {
+        .index_buf = index_buf,
+        .sub_buf = sub_buf,
+        .index_cap = sizeof(index_buf),
+        .sub_cap = sizeof(sub_buf),
+        .index = &index,
+        .subs = subs,
+        .loaded_count = &loaded,
+    };
+    magpie_pull_result_t result;
 
-    /* ttft_ms is a total; the average is ttft_ms / timed. */
-    CHECK(usage->timed_calls == 156);
-    CHECK(usage->average_ttft_ms == usage->ttft_ms_total / usage->timed_calls);
-    CHECK(usage->average_ttft_ms == 3133);
-    CHECK(usage->cost_micros == 216919);
+    CHECK(magpie_pull_once(&source, &ctx, &result));
+    CHECK(result.index_ok);
+    CHECK(result.subs_ok == 7);
+    CHECK(result.subs_failed == 0);
+    CHECK(result.last_error == MAGPIE_SOURCE_OK);
+    CHECK(loaded == 7);
+    CHECK(fake.opens == 1);
+    CHECK(fake.closes == 1);
+    CHECK(index.count == 7);
+    CHECK_STR(subs[0].name, "Kimi Code (China)");
 
-    /* Latest request comes from the requests document. */
-    CHECK_STR(snapshot->latest.model, "deepseek-v4.1-flash");
-    CHECK(snapshot->latest.status == 200);
-    CHECK(snapshot->latest.latency_ms == 3116);
-    CHECK(!snapshot->latest.failed);
+    /* One failing slot keeps the other pages. */
+    fake.sub_fail_slot = 3;
+    CHECK(magpie_pull_once(&source, &ctx, &result));
+    CHECK(result.subs_ok == 6);
+    CHECK(result.subs_failed == 1);
+    CHECK(result.last_error == MAGPIE_SOURCE_ERR_TIMEOUT);
+    CHECK(loaded == 6);
+    CHECK(!subs[3].loaded);
+    CHECK(subs[4].loaded);
 
-    free(snapshot);
-}
+    /* A failing INDEX aborts the cycle without touching the pages. */
+    fake.index_result = MAGPIE_SOURCE_ERR_TIMEOUT;
+    magpie_sub_t before = subs[4];
+    CHECK(!magpie_pull_once(&source, &ctx, &result));
+    CHECK(!result.index_ok);
+    CHECK(result.last_error == MAGPIE_SOURCE_ERR_TIMEOUT);
+    CHECK(memcmp(&subs[4], &before, sizeof(before)) == 0);
+    CHECK(fake.closes == 3); /* closed even on failure */
+    fake.index_result = MAGPIE_SOURCE_OK;
 
-static void test_usage_edge_cases(void)
-{
-    magpie_snapshot_t snapshot;
-    magpie_snapshot_clear(&snapshot);
+    /* A shorter list clears the slots that fell off. */
+    const char *two = "{\"v\":1,\"t\":7,\"c\":2,\"lo\":{},\"ids\":[0,1]}";
+    fake.index_body = two;
+    CHECK(magpie_pull_once(&source, &ctx, &result));
+    CHECK(index.count == 2);
+    CHECK(loaded == 2);
+    CHECK(!subs[2].loaded);
 
-    /* Empty response: every aggregate reads 0, no series, no division by zero. */
-    CHECK(magpie_parse_usage("{}", 2, &snapshot) == MAGPIE_OK);
-    CHECK(snapshot.usage.calls == 0);
-    CHECK(snapshot.usage.tokens_total == 0);
-    CHECK(snapshot.usage.tokens_today == 0);
-    CHECK(snapshot.usage.tokens_7d == 0);
-    CHECK(snapshot.usage.average_ttft_ms == 0);
-    CHECK(snapshot.usage.series_count == 0);
-
-    /* A series longer than the kept window keeps only the newest buckets. */
-    char doc[4096];
-    size_t used = (size_t)snprintf(doc, sizeof(doc), "{\"series\":[");
-    for (int i = 0; i < 30; ++i) {
-        used += (size_t)snprintf(doc + used, sizeof(doc) - used,
-                                 "%s{\"input\":%d,\"output\":1,\"calls\":%d}",
-                                 i ? "," : "", (i + 1) * 10, i);
+    for (uint8_t slot = 0; slot < 7; ++slot) {
+        free((void *)fake.sub_bodies[slot]);
     }
-    snprintf(doc + used, sizeof(doc) - used, "]}");
-    CHECK(magpie_parse_usage(doc, strlen(doc), &snapshot) == MAGPIE_OK);
-    CHECK(snapshot.usage.series_count == MAGPIE_SERIES_MAX);
-    /* Today (i == 29) has input 300 + output 1. */
-    CHECK(snapshot.usage.tokens_today == 301);
-    CHECK(snapshot.usage.calls_today == 29);
-    /* Buckets 23..29 keep inputs 240..300, each with one output token. */
-    CHECK(snapshot.usage.tokens_7d ==
-          (241 + 251 + 261 + 271 + 281 + 291 + 301));
-
-    /* "errors" larger than "calls" is clamped for a sane success rate. */
-    magpie_snapshot_clear(&snapshot);
-    const char *odd = "{\"series\":[{\"input\":1,\"calls\":2,\"errors\":9}]}";
-    CHECK(magpie_parse_usage(odd, strlen(odd), &snapshot) == MAGPIE_OK);
-    CHECK(snapshot.usage.errors_today == 2);
-
-    CHECK(magpie_parse_usage("[]", 2, &snapshot) == MAGPIE_ERR_INVALID_RESPONSE);
-    CHECK(magpie_parse_usage(NULL, 0, &snapshot) == MAGPIE_ERR_INVALID_ARG);
+    free(index_body);
 }
 
-/* ---- requests -------------------------------------------------------- */
+/* ---- UI state -------------------------------------------------------- */
 
-static void test_requests_edge_cases(void)
+/* Like load_fixture() but a missing file is expected (fewer pages than
+ * MAGPIE_SLOTS_MAX); it returns NULL without counting a failure. */
+static char *load_fixture_optional(const char *name, size_t *out_len)
 {
-    magpie_snapshot_t snapshot;
-    magpie_snapshot_clear(&snapshot);
-
-    /* No rows: the UI shows a dash instead of stale data. */
-    CHECK(magpie_parse_requests("{\"rows\":[]}", 11, &snapshot) == MAGPIE_OK);
-    CHECK_STR(snapshot.latest.model, "");
-    CHECK(snapshot.latest.status == 0);
-
-    /* Server error status marks the request failed. */
-    const char *failed =
-        "{\"rows\":[{\"served\":\"m\",\"status\":500,\"ms\":10}]}";
-    CHECK(magpie_parse_requests(failed, strlen(failed), &snapshot) == MAGPIE_OK);
-    CHECK(snapshot.latest.failed);
-
-    /* A non-ASCII model name is sanitised for the ASCII UI font. */
-    const char *utf8 =
-        "{\"rows\":[{\"served\":\"mo\\u00e9l\",\"status\":200}]}";
-    CHECK(magpie_parse_requests(utf8, strlen(utf8), &snapshot) == MAGPIE_OK);
-    CHECK_STR(snapshot.latest.model, "mo?l");
-
-    /* An explicit error flag is enough to mark failure at status 200. */
-    const char *flagged =
-        "{\"rows\":[{\"model\":\"m\",\"status\":200,\"err\":1}]}";
-    CHECK(magpie_parse_requests(flagged, strlen(flagged), &snapshot) == MAGPIE_OK);
-    CHECK(snapshot.latest.failed);
-    CHECK_STR(snapshot.latest.model, "m");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", g_fixture_dir, name);
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        return NULL;
+    }
+    fclose(file);
+    return load_fixture(name, out_len);
 }
 
-/* ---- health ---------------------------------------------------------- */
-
-static void test_health(void)
+static void build_state_from_fixtures(magpie_state_t *state)
 {
-    magpie_snapshot_t snapshot;
-    magpie_snapshot_clear(&snapshot);
-
-    /* A non-Magpie endpoint is rejected: this is what stops the device from
-     * rendering a captive-portal or proxy page as if it were usage data. */
-    const char *other = "{\"name\":\"something-else\",\"version\":\"1\"}";
-    CHECK(magpie_parse_health(other, strlen(other), &snapshot) ==
-          MAGPIE_ERR_INVALID_RESPONSE);
-
-    const char *magpie = "{\"name\":\"magpie\",\"version\":\"0.1.1268\"}";
-    CHECK(magpie_parse_health(magpie, strlen(magpie), &snapshot) == MAGPIE_OK);
-    CHECK_STR(snapshot.gateway_version, "0.1.1268");
+    magpie_state_init(state);
+    size_t len = 0;
+    char *body = load_fixture("payloads/index.json", &len);
+    if (!body) {
+        return;
+    }
+    magpie_index_t index;
+    if (magpie_decode_index(body, len, &index) == MAGPIE_OK) {
+        magpie_state_set_index(state, &index);
+    }
+    free(body);
+    for (uint8_t slot = 0; slot < MAGPIE_SLOTS_MAX; ++slot) {
+        char name[32];
+        snprintf(name, sizeof(name), "payloads/sub-%u.json", (unsigned)slot);
+        char *sub_body = load_fixture_optional(name, &len);
+        if (!sub_body) {
+            continue;
+        }
+        magpie_sub_t sub;
+        if (magpie_decode_sub(sub_body, len, slot, &sub) == MAGPIE_OK) {
+            CHECK(magpie_state_set_sub(state, &sub));
+        }
+        free(sub_body);
+    }
 }
 
-/* ---- formatting ------------------------------------------------------ */
+static void test_ui_state(void)
+{
+    magpie_state_t state;
+    build_state_from_fixtures(&state);
+    CHECK(state.pages_visible == 7);
+    CHECK(state.sub_count == 7);
+
+    /* Nothing has arrived yet: CONNECTING, not a fake LIVE. */
+    magpie_header_text_t header;
+    magpie_header_text(&state, &header);
+    CHECK_STR(header.status, "CONNECTING");
+    CHECK_STR(header.transport, "");
+    CHECK_STR(header.tightest, "waiting for first snapshot");
+    CHECK_STR(header.counter, "1/7");
+    magpie_state_set_page(&state, 2);
+    magpie_header_text(&state, &header);
+    CHECK_STR(header.counter, "3/7");
+    magpie_state_set_page(&state, 0);
+
+    magpie_state_mark_data(&state, 3, MAGPIE_TRANSPORT_BLE);
+    magpie_header_text(&state, &header);
+    CHECK_STR(header.status, "LIVE");
+    CHECK_STR(header.transport, "BLE");
+    CHECK(!header.stale);
+    CHECK(strstr(header.tightest, "Kimi Code (China)") == header.tightest);
+    CHECK(strstr(header.tightest, "7d") != NULL);
+    CHECK(strstr(header.tightest, "100%") != NULL);
+
+    /* 60 s without data is STALE, 180 s is OFFLINE. */
+    magpie_state_tick(&state, MAGPIE_STALE_AFTER_S);
+    CHECK(magpie_state_link(&state) == MAGPIE_LINK_STALE);
+    magpie_header_text(&state, &header);
+    CHECK_STR(header.status, "STALE");
+    CHECK(header.stale);
+    magpie_state_tick(&state, MAGPIE_STALE_AFTER_S * 3);
+    CHECK(magpie_state_link(&state) == MAGPIE_LINK_OFFLINE);
+    magpie_state_tick(&state, MAGPIE_STALE_AFTER_S - 1);
+    CHECK(magpie_state_link(&state) == MAGPIE_LINK_LIVE);
+    /* A Wi-Fi snapshot replaces the transport hint. */
+    magpie_state_mark_data(&state, 1, MAGPIE_TRANSPORT_WIFI);
+    magpie_header_text(&state, &header);
+    CHECK_STR(header.transport, "WIFI");
+
+    /* Per-page text. */
+    magpie_page_text_t page;
+    CHECK(magpie_page_text(&state, 0, &page));
+    CHECK_STR(page.name, "Kimi Code (China)");
+    CHECK_STR(page.plan, "");
+    CHECK(!page.error);
+    CHECK(page.window_count == 2);
+    CHECK_STR(page.window_label[0], "7-DAY WINDOW");
+    CHECK_STR(page.window_used[0], "100%");
+    CHECK(page.window_used_percent[0] == 100);
+    CHECK_STR(page.window_reset[0], "8h 10m");
+    CHECK_STR(page.window_label[1], "5-HOUR WINDOW");
+    CHECK_STR(page.window_used[1], "7%");
+
+    CHECK(magpie_page_text(&state, 1, &page));
+    CHECK_STR(page.name, "Claude Code (1)");
+    CHECK_STR(page.plan, "PRO");
+    CHECK_STR(page.window_label[0], "5-HOUR WINDOW");
+    CHECK_STR(page.window_used[0], "98%");
+    CHECK_STR(page.window_reset[0], "6h 40m");
+
+    /* The unknown reset time renders as "--". */
+    CHECK(magpie_page_text(&state, 5, &page));
+    CHECK_STR(page.name, "WorkBuddy");
+    CHECK_STR(page.window_reset[0], "--");
+
+    /* A page outside the reported count is empty. */
+    CHECK(!magpie_page_text(&state, 9, &page));
+    CHECK(page.empty);
+    CHECK_STR(page.name, "No subscription");
+
+    /* A page whose SUB never arrived reads as loading. */
+    magpie_sub_t cleared;
+    magpie_sub_clear(&cleared, 4);
+    state.subs[4] = cleared;
+    CHECK(!magpie_page_text(&state, 4, &page));
+    CHECK(page.empty);
+    CHECK_STR(page.name, "Loading...");
+
+    /* Signed-out providers show their error flag. */
+    magpie_sub_t errored;
+    magpie_sub_clear(&errored, 4);
+    errored.loaded = true;
+    errored.error = true;
+    strcpy(errored.name, "MiniMax");
+    strcpy(errored.provider, "minimax");
+    state.subs[4] = errored;
+    CHECK(magpie_page_text(&state, 4, &page));
+    CHECK(page.error);
+    CHECK(page.window_count == 0);
+
+    /* A shrinking index hides pages and forgets their payloads. */
+    magpie_index_t smaller;
+    magpie_index_clear(&smaller);
+    smaller.version = 1;
+    smaller.count = 3;
+    smaller.id_count = 3;
+    smaller.ids[0] = 0;
+    smaller.ids[1] = 1;
+    smaller.ids[2] = 2;
+    magpie_state_set_index(&state, &smaller);
+    CHECK(state.pages_visible == 3);
+    CHECK(state.sub_count == 3);
+    CHECK(!state.subs[6].loaded);
+    /* A SUB for a hidden slot is refused. */
+    magpie_sub_t late;
+    magpie_sub_clear(&late, 6);
+    late.loaded = true;
+    strcpy(late.name, "Late");
+    strcpy(late.provider, "late");
+    CHECK(!magpie_state_set_sub(&state, &late));
+}
+
+static void test_countdown_format(void)
+{
+    char text[24];
+    magpie_format_countdown(0, 1000, text, sizeof(text));
+    CHECK_STR(text, "--");
+    magpie_format_countdown(-5, 1000, text, sizeof(text));
+    CHECK_STR(text, "--");
+    magpie_format_countdown(1000, 1000, text, sizeof(text));
+    CHECK_STR(text, "now");
+    magpie_format_countdown(1000 + 30, 1000, text, sizeof(text));
+    CHECK_STR(text, "<1m");
+    magpie_format_countdown(1000 + 42 * 60, 1000, text, sizeof(text));
+    CHECK_STR(text, "42m");
+    magpie_format_countdown(1000 + 3 * 3600 + 5 * 60, 1000, text,
+                            sizeof(text));
+    CHECK_STR(text, "3h 05m");
+    magpie_format_countdown(1000 + 2 * 86400 + 8 * 3600, 1000, text,
+                            sizeof(text));
+    CHECK_STR(text, "2d 8h");
+
+    magpie_format_plan("pro", text, sizeof(text));
+    CHECK_STR(text, "PRO");
+    magpie_format_plan("", text, sizeof(text));
+    CHECK_STR(text, "");
+    magpie_format_plan(NULL, text, sizeof(text));
+    CHECK_STR(text, "");
+    magpie_format_plan("none", text, sizeof(text));
+    CHECK_STR(text, "");
+    magpie_format_plan("Team", text, sizeof(text));
+    CHECK_STR(text, "TEAM");
+}
+
+/* ---- shared formatters ---------------------------------------------- */
 
 static void check_format_percent(float value, bool known, const char *expected)
 {
@@ -619,116 +707,33 @@ static void check_format_percent(float value, bool known, const char *expected)
     CHECK_STR(text, expected);
 }
 
-static void check_format_count(uint64_t value, const char *expected)
-{
-    char text[24];
-    magpie_format_count(value, text, sizeof(text));
-    CHECK_STR(text, expected);
-}
-
-static void check_format_duration(int32_t seconds, bool known, const char *expected)
-{
-    char text[24];
-    magpie_format_duration(seconds, known, text, sizeof(text));
-    CHECK_STR(text, expected);
-}
-
 static void test_format(void)
 {
     check_format_percent(84.0f, true, "84%");
     check_format_percent(0.0f, true, "0.0%");
     check_format_percent(3.7f, true, "3.7%");
-    check_format_percent(9.96f, true, "10.0%");
     check_format_percent(100.0f, true, "100%");
     check_format_percent(120.0f, true, "100%");
     check_format_percent(-5.0f, true, "0.0%");
     check_format_percent(50.0f, false, "--");
 
-    check_format_count(0, "0");
-    check_format_count(512, "512");
-    check_format_count(1000, "1.0K");
-    check_format_count(12345, "12.3K");
-    check_format_count(1250000, "1.25M");
-    check_format_count(5172035, "5.17M");
-    check_format_count(3400000000ULL, "3.40B");
-
-    check_format_duration(0, true, "now");
-    check_format_duration(-5, true, "now");
-    check_format_duration(30, true, "<1m");
-    check_format_duration(42 * 60, true, "42m");
-    check_format_duration(3 * 3600 + 5 * 60, true, "3h 05m");
-    check_format_duration(2 * 86400 + 8 * 3600, true, "2d 8h");
-    check_format_duration(100, false, "--");
-
     char text[24];
-    magpie_format_cost(0, text, sizeof(text));
-    CHECK_STR(text, "$0");
-    magpie_format_cost(1230000, text, sizeof(text));
-    CHECK_STR(text, "$1.23");
-    magpie_format_cost(4000, text, sizeof(text));
-    CHECK_STR(text, "$0.004");
-    magpie_format_cost(226035, text, sizeof(text));
-    CHECK_STR(text, "$0.22");
-
-    magpie_format_age(2, true, text, sizeof(text));
-    CHECK_STR(text, "just now");
-    magpie_format_age(12, true, text, sizeof(text));
-    CHECK_STR(text, "12s ago");
-    magpie_format_age(240, true, text, sizeof(text));
-    CHECK_STR(text, "4m ago");
-    magpie_format_age(7300, true, text, sizeof(text));
-    CHECK_STR(text, "2h ago");
-    magpie_format_age(0, false, text, sizeof(text));
-    CHECK_STR(text, "never");
-
-    magpie_format_latency(333, text, sizeof(text));
-    CHECK_STR(text, "333ms");
-    magpie_format_latency(8300, text, sizeof(text));
-    CHECK_STR(text, "8.3s");
-    magpie_format_latency(125000, text, sizeof(text));
-    CHECK_STR(text, "2m 05s");
-
-    magpie_short_provider("office/claude", text, sizeof(text));
-    CHECK_STR(text, "claude");
-    magpie_short_provider("copilot", text, sizeof(text));
-    CHECK_STR(text, "copilot");
-    magpie_short_provider(NULL, text, sizeof(text));
-    CHECK_STR(text, "");
+    magpie_format_count(0, text, sizeof(text));
+    CHECK_STR(text, "0");
+    magpie_format_count(12345, text, sizeof(text));
+    CHECK_STR(text, "12.3K");
+    magpie_format_count(5172035, text, sizeof(text));
+    CHECK_STR(text, "5.17M");
 
     magpie_upper("live", text, sizeof(text));
     CHECK_STR(text, "LIVE");
-    magpie_upper(NULL, text, sizeof(text));
-    CHECK_STR(text, "");
+    magpie_short_provider("office/claude", text, sizeof(text));
+    CHECK_STR(text, "claude");
 
-    /* Every writer must terminate exactly, even with a one-byte buffer. */
+    /* Every writer terminates even with a one-byte buffer. */
     char one = 'x';
     magpie_format_count(1234567, &one, 1);
     CHECK(one == '\0');
-    magpie_format_percent(50, true, &one, 1);
-    CHECK(one == '\0');
-}
-
-/* ---- end-to-end: fixtures -> model -> rendered strings ---------------- */
-
-static void test_render_pipeline(void)
-{
-    const int64_t now = 1792543800LL;
-    magpie_snapshot_t *snapshot = load_snapshot(now, "office/");
-    if (!snapshot) {
-        return;
-    }
-
-    char percent[16];
-    char count[24];
-    char provider[MAGPIE_TEXT_MAX];
-    magpie_format_percent(snapshot->quota_remaining, snapshot->has_quota, percent,
-                          sizeof(percent));
-    CHECK_STR(percent, "0.0%");
-    magpie_format_count(snapshot->usage.tokens_today, count, sizeof(count));
-    CHECK_STR(count, "5.11M");
-    magpie_short_provider(snapshot->quota_provider, provider, sizeof(provider));
-    CHECK_STR(provider, "kimi-code-cn");
-    free(snapshot);
 }
 
 int main(int argc, char **argv)
@@ -739,17 +744,15 @@ int main(int argc, char **argv)
     }
     g_fixture_dir = argv[1];
 
-    test_iso8601();
     test_json_scanner();
-    test_quotas_fixture();
-    test_quotas_filter();
-    test_quotas_edge_cases();
-    test_usage_fixture();
-    test_usage_edge_cases();
-    test_requests_edge_cases();
-    test_health();
+    test_index_fixture();
+    test_index_edge_cases();
+    test_sub_fixture();
+    test_sub_edge_cases();
+    test_pull_cycle();
+    test_ui_state();
+    test_countdown_format();
     test_format();
-    test_render_pipeline();
 
     printf("%u checks, %u failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

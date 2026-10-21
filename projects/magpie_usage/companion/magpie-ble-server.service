@@ -1,0 +1,27 @@
+[Unit]
+Description=Magpie usage display - Bluetooth LE peripheral (omarchy companion)
+Documentation=file://%h/workspace/esp-mosaico-magpie/projects/magpie_usage/companion/README.md
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+# dbus-next is not a system package; install it in a dedicated venv (see README).
+ExecStart=%h/.venvs/magpie-display/bin/python %h/workspace/esp-mosaico-magpie/projects/magpie_usage/companion/magpie_ble_server.py --adapter /org/bluez/hci0
+WorkingDirectory=%h/workspace/esp-mosaico-magpie/projects/magpie_usage/companion
+Restart=on-failure
+RestartSec=5
+# Read-only loopback access to the local Magpie gateway.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# Keep D-Bus access (BlueZ) while restricting the rest of the namespace.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=magpie-ble-server
+
+[Install]
+WantedBy=default.target

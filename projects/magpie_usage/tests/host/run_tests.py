@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Host-side tests for the Magpie encoder, parsers and formatting helpers.
+"""Host-side tests for the Magpie payload parser, pull cycle and UI state.
 
 The firmware sources tested here are portable C with no ESP-IDF dependency, so
 this runner simply compiles them with the host compiler and runs a small test
 harness. Fixtures under fixtures/ were captured from a real Magpie gateway by
-tools/make_fixtures.py (read-only GETs, scrubbed of account data).
+tools/make_fixtures.py (read-only GETs, scrubbed of account data); the
+payloads/ fixtures are generated from that capture by tools/make_payloads.py,
+so the decoder is tested against the exact bytes the companion sends.
 
 Usage:
     python3 tests/host/run_tests.py             # build and run
@@ -34,6 +36,8 @@ SOURCES = [
     MAIN / "magpie_json.c",
     MAIN / "magpie_parse.c",
     MAIN / "magpie_format.c",
+    MAIN / "magpie_pull.c",
+    MAIN / "magpie_ui_state.c",
     HERE / "test_magpie.c",
 ]
 

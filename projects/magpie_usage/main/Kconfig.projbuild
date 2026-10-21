@@ -1,0 +1,95 @@
+menu "Magpie usage display"
+
+    choice MAGPIE_DISPLAY_TRANSPORT
+        prompt "Preferred transport"
+        default MAGPIE_DISPLAY_TRANSPORT_AUTO
+        help
+            The device pulls its snapshot from the omarchy companion. "BLE first"
+            scans/connects over Bluetooth LE and falls back to the Wi-Fi HTTP
+            endpoint after the configured number of failed connects.
+
+        config MAGPIE_DISPLAY_TRANSPORT_AUTO
+            bool "BLE first, Wi-Fi fallback"
+
+        config MAGPIE_DISPLAY_TRANSPORT_BLE
+            bool "BLE only"
+
+        config MAGPIE_DISPLAY_TRANSPORT_WIFI
+            bool "Wi-Fi only"
+    endchoice
+
+    config MAGPIE_DISPLAY_BLE_NAME
+        string "Advertised BLE local name to prefer"
+        default "magpie-usage"
+        help
+            The central filters advertisements by the Magpie display service
+            UUID; this name is only used to break ties between several senders.
+
+    config MAGPIE_DISPLAY_BLE_SCAN_MS
+        int "BLE scan window per connect attempt (ms)"
+        range 1000 30000
+        default 4000
+
+    config MAGPIE_DISPLAY_BLE_MTU
+        int "Requested ATT MTU"
+        range 23 517
+        default 247
+        help
+            Payloads are <= 180 bytes, so 185 already works. The sender keeps
+            notifications under that limit and never relies on long reads.
+
+    config MAGPIE_DISPLAY_BLE_FAILS_BEFORE_WIFI
+        int "Failed BLE connects before using Wi-Fi"
+        range 1 10
+        default 2
+
+    config MAGPIE_DISPLAY_WIFI_HOST
+        string "Companion HTTP host (LAN name or IP, empty disables Wi-Fi)"
+        default ""
+        help
+            Host running magpie_http_server.py. The device never contacts Magpie
+            directly: Magpie requires caller keys off loopback, and those must
+            not live on the device.
+
+    config MAGPIE_DISPLAY_WIFI_PORT
+        int "Companion HTTP port"
+        range 1 65535
+        default 8099
+
+    config MAGPIE_DISPLAY_WIFI_TOKEN
+        string "Optional bearer token for the companion HTTP endpoint"
+        default ""
+        help
+            Read-only display data; leave empty on a trusted LAN. Prefer setting
+            it at runtime in NVS (namespace "magpie", key "wifi_token") so it is
+            not baked into the binary.
+
+    config MAGPIE_DISPLAY_WIFI_TIMEOUT_MS
+        int "HTTP request timeout (ms)"
+        range 1000 60000
+        default 8000
+
+    config MAGPIE_DISPLAY_WIFI_START_RADIO
+        bool "Bring up Wi-Fi STA from the sysmeta credentials"
+        default y
+        help
+            Uses the "wifi"/"ssid"+"password" NVS entries written by
+            "python mosaico.py iris test recovery-wifi". No credentials are
+            compiled in.
+
+    config MAGPIE_DISPLAY_REFRESH_INTERVAL_S
+        int "Refresh interval while subscribed (s)"
+        range 5 600
+        default 15
+
+    config MAGPIE_DISPLAY_IDLE_INTERVAL_S
+        int "Safety-net re-read interval without notifications (s)"
+        range 10 600
+        default 30
+
+    config MAGPIE_DISPLAY_STALE_AFTER_S
+        int "Age after which the snapshot is stale (s)"
+        range 10 600
+        default 60
+
+endmenu

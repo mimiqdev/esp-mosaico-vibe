@@ -8,59 +8,42 @@
 #include "magpie_model.h"
 
 /*
- * Magpie response parsers.
+ * Decoder for the device-pull display protocol (v1).
  *
- * Pure C, no ESP-IDF and no I/O: each function turns one Magpie JSON document
- * into the portable model. The device feeds them HTTP bodies; the host tests
- * feed them fixtures captured from a real gateway (tests/host/fixtures).
+ * Pure C, no ESP-IDF and no I/O: the BLE central and the HTTP fallback both
+ * hand their received bytes to these functions, and the host tests decode the
+ * exact payloads the companion produces (tests/host/fixtures/payloads).
  *
- * Return values are esp_err_t-compatible but declared as plain int so the host
- * build needs no ESP-IDF headers.
+ * Payload shapes (see docs/protocol.md):
+ *
+ *   INDEX  {"v":1,"t":<epoch>,"c":<count>,"lo":{"i","n","w","u","r"},
+ *           "ids":[0,1,..]}
+ *   SUB    {"i":<slot>,"p":<provider>,"n":<name>,"pl":<plan>,"e":<0|1>,
+ *           "w":[{"n":"5h","u":84,"r":<epoch>}...]}
  */
 
 #define MAGPIE_OK 0
 #define MAGPIE_ERR_INVALID_ARG 0x102
 #define MAGPIE_ERR_INVALID_RESPONSE 0x10c
 
+/** Decode an INDEX payload into out. */
+int magpie_decode_index(const char *body, size_t len, magpie_index_t *out);
+
 /**
- * Parse "/v1/magpie/quotas".
+ * Decode a SUB payload into out.
  *
- * @param body            JSON document
- * @param len             length in bytes
- * @param now_epoch       current Unix time, used to derive reset countdowns
- * @param provider_filter optional comma-separated prefix list (e.g. "office/");
- *                        NULL or "" keeps every provider
- * @param out             snapshot receiving providers and the worst window
- *
- * Providers that report an error (signed out) are kept so the UI can show them.
+ * The payload's own "i" identifies the slot; @p expected_slot must match it
+ * (use -1 to accept any). A mismatch is an invalid response, so stale reads
+ * cannot overwrite another page.
  */
-int magpie_parse_quotas(const char *body, size_t len, int64_t now_epoch,
-                        const char *provider_filter, magpie_snapshot_t *out);
+int magpie_decode_sub(const char *body, size_t len, int expected_slot,
+                      magpie_sub_t *out);
 
-/** Parse "/v1/magpie/usage" into out->usage. */
-int magpie_parse_usage(const char *body, size_t len, magpie_snapshot_t *out);
+/** Reset an index to its empty state. */
+void magpie_index_clear(magpie_index_t *index);
 
-/** Parse "/v1/magpie/usage/requests?limit=N" into out->latest. */
-int magpie_parse_requests(const char *body, size_t len, magpie_snapshot_t *out);
+/** Reset a subscription to its empty state (keeps the slot id). */
+void magpie_sub_clear(magpie_sub_t *sub, uint8_t slot);
 
-/** Parse the "/" health document into out->gateway_version. */
-int magpie_parse_health(const char *body, size_t len, magpie_snapshot_t *out);
-
-/** Reset a snapshot to its empty state before a refresh cycle. */
-void magpie_snapshot_clear(magpie_snapshot_t *snapshot);
-
-/** Count providers that report an error, for the status line. */
-uint8_t magpie_snapshot_error_count(const magpie_snapshot_t *snapshot);
-
-/**
- * Parse an ISO-8601 timestamp ("2026-10-21T12:29:00+08:00", "...Z", with
- * optional fractional seconds) into Unix seconds. Returns false when the text
- * is not a recognisable timestamp.
- */
-bool magpie_parse_iso8601(const char *text, int64_t *out_epoch);
-
-/**
- * Days in a civil date (Howard Hinnant's algorithm), exposed for the test of
- * magpie_parse_iso8601.
- */
-int64_t magpie_days_from_civil(int year, unsigned month, unsigned day);
+/** Tiny helpers shared with the transport layer. */
+bool magpie_payload_fits(size_t len, size_t limit);

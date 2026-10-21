@@ -1,0 +1,26 @@
+[Unit]
+Description=Magpie usage display - read-only HTTP fallback (omarchy companion)
+Documentation=file://%h/workspace/esp-mosaico-magpie/projects/magpie_usage/companion/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# --bind/--port select the LAN address the device can reach. The optional
+# bearer token is read from ~/.config/magpie-display/env.
+ExecStart=/usr/bin/python3 %h/workspace/esp-mosaico-magpie/projects/magpie_usage/companion/magpie_http_server.py --bind 0.0.0.0 --port 8099
+WorkingDirectory=%h/workspace/esp-mosaico-magpie/projects/magpie_usage/companion
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+# The token lives in ~/.config/magpie-display/env; home stays readable, not writable.
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=magpie-http-server
+
+[Install]
+WantedBy=default.target

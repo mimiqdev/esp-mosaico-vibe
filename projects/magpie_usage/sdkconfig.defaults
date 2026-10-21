@@ -4,6 +4,10 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# The IDF size check warns that `factory` is too small for the application.
+# That is expected: `factory` is the retained Recovery image and this app is
+# installed into the 12.9 MB `ota_0` partition by `mosaico.py iris
+# system-update`. Do not enlarge `factory` to silence it.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Persist ESP-IDF Core Dumps and the bounded ESP-Iris pre-crash log ring in
@@ -46,6 +50,27 @@ CONFIG_TINYUSB_CDC_RX_BUFSIZE=1024
 CONFIG_TINYUSB_CDC_TX_BUFSIZE=1024
 CONFIG_TINYUSB_CDC_EP_BUFSIZE=512
 
+# Bluetooth LE central only (NimBLE): the usage display pulls its snapshot from
+# the omnia companion. Only the central/observer roles are enabled and the GATT
+# server is disabled to keep RAM free next to Wi-Fi.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+# CONFIG_BT_BLUEDROID_ENABLED is not set
+# CONFIG_BT_CONTROLLER_ONLY is not set
+CONFIG_BT_CONTROLLER_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+# CONFIG_BT_NIMBLE_ROLE_PERIPHERAL is not set
+# CONFIG_BT_NIMBLE_ROLE_BROADCASTER is not set
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+CONFIG_BT_NIMBLE_NVS_PERSIST=n
+CONFIG_BT_NIMBLE_SM_SC=y
+# CONFIG_BT_NIMBLE_GATT_SERVER is not set
+CONFIG_BT_CTRL_BLE_ENABLE=y
+CONFIG_BT_CTRL_RUN_IN_FLASH_ONLY=y
+CONFIG_BT_CTRL_MODEM_SLEEP=y
+
 # ESP-Mosaico 480x480 CO5300 QSPI display. GSP presents through
 # esp_display_present; the BSP still pulls LVGL as a dependency.
 CONFIG_BSP_CO5300_ENABLE_TE=y
@@ -55,6 +80,10 @@ CONFIG_LV_OS_FREERTOS=y
 CONFIG_LV_USE_CLIB_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
+# GSP queues runtime updates before the render task applies them. The usage
+# display can have 16 pages with three window rows each, so keep enough head
+# room for a full snapshot plus the header instead of dropping updates.
+CONFIG_ESP_GSP_QUEUE_DEPTH=128
 
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_250M=y

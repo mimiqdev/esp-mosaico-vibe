@@ -5,90 +5,69 @@
 #include <stdint.h>
 
 /*
- * Portable Magpie usage model.
+ * Portable model for the device-pull display protocol (protocol v1).
  *
- * This header is deliberately free of ESP-IDF includes so magpie_json.c,
- * magpie_time.c and magpie_parse.c can be compiled natively for host tests
- * (see tests/host). The device build and the host build share the same source.
+ * No ESP-IDF includes: the payload parser, the store and the UI rendering
+ * strings are compiled natively for the host tests and the PC simulator, and
+ * exactly the same sources run on the device.
+ *
+ * One page == one subscription. The sender (omarchy companion) derives the
+ * payload; the device only decodes it, so every value here is already in the
+ * shape the UI draws.
  */
 
-#define MAGPIE_TEXT_MAX 48
-#define MAGPIE_LABEL_MAX 16
-#define MAGPIE_PROVIDERS_MAX 12
-#define MAGPIE_WINDOWS_MAX 4
-/* Daily token buckets kept for the activity strip (a full week). */
-#define MAGPIE_SERIES_MAX 7
+/** Pages (subscriptions) the firmware can hold. 13 subscriptions today. */
+#define MAGPIE_SLOTS_MAX 16
+/** Quota windows per subscription kept for display. */
+#define MAGPIE_WIN_MAX 3
+#define MAGPIE_PROVIDER_MAX 24
+#define MAGPIE_NAME_MAX 28
+#define MAGPIE_PLAN_MAX 14
+#define MAGPIE_WIN_LABEL_MAX 8
 
-/** One quota window of one provider, e.g. "5 hours" with 16% remaining. */
-typedef struct {
-    char name[MAGPIE_LABEL_MAX];
-    float remaining_percent; /* 0..100 */
-    int32_t reset_in_s;      /* seconds until resetsAt; 0 when unknown */
-    bool unlimited;
-    bool has_reset;
-} magpie_window_t;
+#define MAGPIE_PROTOCOL_VERSION 1
+/** Wire limits shared with the companion (see docs/protocol.md). */
+#define MAGPIE_SUB_BYTES_MAX 180
+#define MAGPIE_INDEX_BYTES_MAX 180
+/** A snapshot older than this many seconds renders as STALE. */
+#define MAGPIE_STALE_AFTER_S 60
+/** Days of history kept for the small activity strip on page 1. */
 
-/** One provider row: subscription name, plan and its quota windows. */
+/** One quota window: short label, used percent and reset epoch. */
 typedef struct {
-    char provider[MAGPIE_TEXT_MAX]; /* provider id, e.g. "office/claude" */
-    char name[MAGPIE_TEXT_MAX];     /* display name, e.g. "Claude Code" */
-    char plan[MAGPIE_LABEL_MAX];
-    char error[MAGPIE_TEXT_MAX];    /* non-empty when the provider is signed out */
-    magpie_window_t windows[MAGPIE_WINDOWS_MAX];
+    char label[MAGPIE_WIN_LABEL_MAX];
+    uint8_t used_percent;   /* 0..100, integer as sent by the companion */
+    int64_t reset_epoch_s;  /* 0 = unknown */
+} magpie_win_t;
+
+/** One subscription == one swipe page. */
+typedef struct {
+    uint8_t index;                      /* slot/id as sent by the companion */
+    char provider[MAGPIE_PROVIDER_MAX];
+    char name[MAGPIE_NAME_MAX];
+    char plan[MAGPIE_PLAN_MAX];
+    bool error;                         /* signed out / provider error */
+    magpie_win_t windows[MAGPIE_WIN_MAX];
     uint8_t window_count;
-    float worst_remaining; /* min over usable windows; 100 when none */
-    int32_t worst_reset_in_s;
-    bool unlimited;
-} magpie_provider_t;
+    bool loaded;                        /* SUB payload received for this slot */
+} magpie_sub_t;
 
-/** Aggregated usage totals plus the daily token series. */
+/** The glance summary carried by INDEX: the tightest window overall. */
 typedef struct {
-    uint32_t calls;
-    uint32_t errors;
-    uint64_t input;
-    uint64_t output;
-    uint64_t reasoning;
-    uint64_t cache_read;
-    uint64_t cache_write;
-    uint64_t cost_micros;
-    uint32_t ttft_ms_total;
-    uint32_t timed_calls;
-    /* Derived */
-    uint64_t tokens_total;
-    uint64_t tokens_today;
-    uint64_t tokens_7d;
-    uint32_t calls_today;
-    uint32_t errors_today;
-    uint32_t average_ttft_ms;
-    /* Series tail kept for the activity page. */
-    uint8_t series_count;
-    uint64_t series_tokens[MAGPIE_SERIES_MAX];
-} magpie_usage_t;
+    int valid;
+    int slot;
+    char name[MAGPIE_NAME_MAX];
+    char window[MAGPIE_WIN_LABEL_MAX];
+    uint8_t used_percent;
+    int64_t reset_epoch_s;
+} magpie_summary_t;
 
-/** Latest request from /v1/magpie/usage/requests. */
+/** Decoded INDEX payload plus the slot ids it announced. */
 typedef struct {
-    char model[MAGPIE_TEXT_MAX];
-    int32_t status;
-    uint32_t latency_ms;
-    bool failed;
-} magpie_request_t;
-
-/** Everything the UI needs; produced by the parser, consumed by the UI only. */
-typedef struct {
-    magpie_provider_t providers[MAGPIE_PROVIDERS_MAX];
-    uint8_t provider_count;
-    uint16_t provider_total; /* count before the display cap */
-
-    /* Most constrained window across all providers (the glance value). */
-    bool has_quota;
-    char quota_provider[MAGPIE_TEXT_MAX];
-    char quota_window[MAGPIE_LABEL_MAX];
-    float quota_remaining;
-    int32_t quota_reset_in_s;
-    bool quota_has_reset;
-
-    magpie_usage_t usage;
-    magpie_request_t latest;
-
-    char gateway_version[MAGPIE_LABEL_MAX];
-} magpie_snapshot_t;
+    uint8_t version;
+    int64_t sender_epoch_s;
+    uint8_t count;
+    magpie_summary_t summary;
+    uint8_t ids[MAGPIE_SLOTS_MAX];
+    uint8_t id_count;
+} magpie_index_t;
